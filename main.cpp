@@ -276,7 +276,7 @@ int main()
             std::cout << "--- WRITE END ---\n";
             num_packets_rx++;
             if(num_packets_rx > 2){
-                outfile->Close();
+                //outfile->Close();
                 break;
             }
 
