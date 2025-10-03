@@ -5,19 +5,20 @@ cmake -S . -B build/
 cd build && make -j && cd ..
 ```
 # Setup
-You must have a file called `fs.dbc` in the directory of the executable
+You must have a dbc file in the directory of the executable
 
-It will attempt to open a socket and bind it to `vcan0`, so use ip tools to create that interface:
+It will attempt to open a socket and bind it to `vcan0` (soon to be removed defualt), so use ip tools to create that interface:
 ```
 sudo ip link add name vcan0 type vcan
 sudo ip link set dev vcan0 up
 ```
 
-You will also need can-utils and a candump capture (or other way to put messages onto vcan0)
+You will also need a can-utils candump capture or live can bus and socketcan interface to it
+
+If you wish to test socket mode using a candump capture you can invoke canplay on vcan0:
 ```
 canplayer -i -v vcan0=can0 -I candump.log
 ```
-
 
 # Usage
 ```
