@@ -1,7 +1,7 @@
 To build:
 ```mkdir build
 cmake -S . -B build/
-build && make -j
+cd build && make -j && cd ..
 ```
 
 You must have a file called `fs.dbc` in the directory of the executable
