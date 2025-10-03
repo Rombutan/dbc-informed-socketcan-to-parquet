@@ -55,30 +55,43 @@ struct SignalTypeOrderTracker
 };
 
 // for using candump only
-void parse_can_line(const std::string& line, float& timestamp, can_frame& frame) { 
-    std::stringstream ss(line);
-    char paren, hash;
-    std::string channel_id_data;
+static inline void trim(std::string &s) {
+    while (!s.empty() && (s.back() == '\r' || s.back() == '\n' || std::isspace((unsigned char)s.back())))
+        s.pop_back();
+    size_t i = 0;
+    while (i < s.size() && std::isspace((unsigned char)s[i]))
+        ++i;
+    s.erase(0, i);
+}
 
-    // 1. Extract Time and the rest of the string
-    // This reads: '(' , TIME, ')', ' ', and the rest into channel_id_data
-    if (!(ss >> paren >> timestamp >> paren >> channel_id_data)) {
-        //std::cerr << "Error: Failed to parse timestamp or initial format." << std::endl;
+void parse_can_line(const std::string line, float& timestamp, can_frame& frame, bool& good) { 
+    std::string clean = line;
+    // trim trailing CR/LF
+    while (!clean.empty() && (clean.back() == '\r' || clean.back() == '\n'))
+        clean.pop_back();
+
+    if (clean.empty()){
+        good=false;
+        std::cout << "emptey line in candump... trying next\n";
         return;
     }
 
-    // Example channel_id_data: "can0 000A0003#006700050FB20000"
+    std::istringstream iss(clean);
+    std::string ts_block, channel, iddata;
+
+    if (!(iss >> ts_block >> channel >> iddata)) {
+        std::cerr << "DEBUG: input=[" << clean << "]\n";
+        throw std::runtime_error("parse_can_line: unable to split line into 3 fields");
+    }
+
+    // now extract timestamp
+    if (ts_block.size() < 2 || ts_block.front() != '(' || ts_block.back() != ')') {
+        throw std::runtime_error("parse_can_line: bad timestamp format: " + ts_block);
+    }
+    std::string ts_str = ts_block.substr(1, ts_block.size() - 2);
+    timestamp = std::stof(ts_str);
     
-    // 2. Extract Channel, CAN ID, and Data payload
-    // Find the space between channel ("can0") and the CAN data ("000A0003#...")
-    size_t space_pos = channel_id_data.find(' ');
-    if (space_pos == std::string::npos) {
-        std::cerr << "Error: Could not find space separator." << std::endl;
-        return;
-    }
-
-    // Isolate the "ID#DATA" part
-    std::string id_data_payload = channel_id_data.substr(space_pos + 1);
+    std::string id_data_payload = iddata;
     
     // Find the '#' separator
     size_t hash_pos = id_data_payload.find('#');
@@ -107,6 +120,9 @@ void parse_can_line(const std::string& line, float& timestamp, can_frame& frame)
         // std::stoul converts the two hex chars to a byte value
         frame.data[i] = static_cast<__u8>(std::stoul(byte_str, nullptr, 16));
     }
+
+    //std::cout << "successfully parsed line with id: " << frame.can_id << "\n";
+    good=true;
 }
 
 // needed to get timestamp of beginning of file
@@ -129,7 +145,7 @@ using ArrowSchemaList = std::vector<SignalTypeOrderTracker>;
 static std::shared_ptr<arrow::io::FileOutputStream> outfile;
 
 bool use_socketcan = true; // if false, read from candump file
-int num_packets_to_read = 100;
+int num_packets_to_read = 1000;
 std::string dbc_filename = "fs.dbc";
 std::string parquet_filename = "test.parquet";
 std::string can_interface = "vcan0";
@@ -223,7 +239,7 @@ int main(int argc, char* argv[])
             return 1;
         }
     } else {
-        std::ifstream infile(can_interface.c_str());
+        infile = std::ifstream(can_interface.c_str());
     }
 
     // Build list of signals used to match up by index, and also to construct the schema
@@ -311,7 +327,11 @@ int main(int argc, char* argv[])
         float timestamp = 0.0f;
         std::string line;
         std::getline(infile, line);
-        parse_can_line(line, timestamp, fframe);
+        bool good = false;
+        while (!good){
+            parse_can_line(line, timestamp, fframe, good);
+        }
+        
         start_time_s = timestamp;
     }
 
@@ -345,7 +365,18 @@ int main(int argc, char* argv[])
             float timestamp = 0.0f;
             std::string line;
             std::getline(infile, line);
-            parse_can_line(line, timestamp, frame);
+            bool good = false;
+
+            int empteylinecounter = 0;
+            while (!good && empteylinecounter < 11){
+                parse_can_line(line, timestamp, frame, good);
+                empteylinecounter++;
+            }
+
+            if(empteylinecounter > 10){
+                std::cout << "Breaking for EOF\n";
+                break;
+            }
 
             rcv_time_ms = (timestamp-start_time_s)*1000;
         }
@@ -413,7 +444,9 @@ int main(int argc, char* argv[])
                 os << parquet::EndRowGroup;
                 //std::cout << outfile->Flush() << "\n";
                 //std::cout << std::flush;
-                break;
+                if(use_socketcan){
+                    break;
+                }
             }
         }
     }
