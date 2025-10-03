@@ -154,7 +154,7 @@ int main(int argc, char* argv[])
 {
     // process arguments
     if(argc < 1){
-        std::cout << "you must provide at least a dbc file name... \n dbcparquetdecoder file.dbc [of output.parquet] [if vcan0] [socket|file] \n \"if\" is used for the interface name in socket mode and the file name in file mode \n";
+        std::cout << "you must provide at least a dbc file name... \n ./decoder file.dbc [of output.parquet] [if vcan0] [socket|file] \n \"if\" is used for the interface name in socket mode and the file name in file mode \n";
     }
 
     int arg = 2;
