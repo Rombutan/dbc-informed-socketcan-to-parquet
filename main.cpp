@@ -59,11 +59,6 @@ struct SignalTypeOrderTracker
 using ArrowSchemaList = std::vector<SignalTypeOrderTracker>;
 static std::shared_ptr<arrow::io::FileOutputStream> outfile;
 
-void handle_signal(int signal) {
-        std::cout << "Caught signal " << signal << ", exiting...\n";
-        outfile->Close();
-        exit(0);
-    }
 
 int main()
 {
@@ -112,6 +107,8 @@ int main()
     // Build list of signals used to match up by index, and also to construct the schema
     ArrowSchemaList schema_fields;
 
+    schema_fields.push_back(SignalTypeOrderTracker{"Time_ms", parquet::Type::type::FLOAT}); // First column is always timestamp
+
     int i = 0;
     while (i < net->Messages_Size()){
         const dbcppp::IMessage& msg_ref = net->Messages_Get(i);
@@ -153,17 +150,14 @@ int main()
     // Build schema from signal list
     parquet::schema::NodeVector fields;
 
-    fields.push_back(parquet::schema::PrimitiveNode::Make(
-            "Time_ms", parquet::Repetition::REQUIRED, parquet::Type::type::FLOAT));
-
     for (const auto& sig_ptr : schema_fields)
     {
         if(sig_ptr.arrow_type == parquet::Type::type::FLOAT){
-            std::cout << "Signal: " << sig_ptr.signal_name << " type: " << static_cast<int>(sig_ptr.arrow_type) << "\n";
+            //std::cout << "Signal: " << sig_ptr.signal_name << " type: " << static_cast<int>(sig_ptr.arrow_type) << "\n";
             fields.push_back(parquet::schema::PrimitiveNode::Make(
                 sig_ptr.signal_name, parquet::Repetition::OPTIONAL, sig_ptr.arrow_type, parquet::ConvertedType::NONE));
         } else if(sig_ptr.arrow_type == parquet::Type::type::INT32){
-            std::cout << "Signal: " << sig_ptr.signal_name << " type: " << static_cast<int>(sig_ptr.arrow_type) << "\n";
+            //std::cout << "Signal: " << sig_ptr.signal_name << " type: " << static_cast<int>(sig_ptr.arrow_type) << "\n";
             fields.push_back(parquet::schema::PrimitiveNode::Make(
                 sig_ptr.signal_name, parquet::Repetition::OPTIONAL, sig_ptr.arrow_type, parquet::ConvertedType::INT_32));
         }
@@ -186,10 +180,6 @@ int main()
       parquet::ParquetFileWriter::Open(outfile, node, builder.build())};
 
     const auto start_time_point = std::chrono::high_resolution_clock::now();
-    const auto start_time = std::chrono::duration_cast<std::chrono::duration<float, std::milli>>(start_time_point.time_since_epoch());
-
-    std::signal(SIGINT, handle_signal);
-    std::signal(SIGTERM, handle_signal);
 
     int num_packets_rx = 0;
 
@@ -200,9 +190,8 @@ int main()
 
         // Get shitty system timestamp that will be off and is not race-condition safe
         auto now_time_point = std::chrono::high_resolution_clock::now();
-        auto difference_duration = now_time_point.time_since_epoch() - start_time;
-        const auto rcv_time_float_duration = std::chrono::duration_cast<std::chrono::duration<float, std::milli>>(difference_duration);
-        float rcv_time_ms = rcv_time_float_duration.count();
+        auto difference_duration = now_time_point - start_time_point;
+        float rcv_time_ms = std::chrono::duration_cast<std::chrono::duration<float, std::milli>>(difference_duration).count();
 
 
         if (nbytes < 0) {
@@ -216,7 +205,7 @@ int main()
         }
 
         // Put the timestamp in only if the message passes the error and incomplete filter
-        os << rcv_time_ms;
+        // os << rcv_time_ms;
 
         
         auto iter = messages.find(frame.can_id);
@@ -227,19 +216,19 @@ int main()
             std::vector<std::variant<std::monostate, float, int32_t>> row_values(schema_fields.size(), std::monostate{});
 
             const dbcppp::IMessage* msg = iter->second;
-            std::cout << "Received Message: " << msg->Name() << "\n";
+            //std::cout << "Received Message: " << msg->Name() << "\n";
             for (const dbcppp::ISignal& sig : msg->Signals())
             {
                 const dbcppp::ISignal* mux_sig = msg->MuxSignal();
                 if (sig.MultiplexerIndicator() != dbcppp::ISignal::EMultiplexer::MuxValue ||
                     (mux_sig && mux_sig->Decode(frame.data) == sig.MultiplexerSwitchValue()))
                 {
-                    std::cout << "\t" << sig.Name() << "=" << sig.RawToPhys(sig.Decode(frame.data)) << sig.Unit() << "\n";
+                    //std::cout << "\t" << sig.Name() << "=" << sig.RawToPhys(sig.Decode(frame.data)) << sig.Unit() << "\n";
                     // Find the index of this signal in the schema list
                     auto it = std::find_if(schema_fields.begin(), schema_fields.end(),
                         [&sig](const SignalTypeOrderTracker& tracker) { return tracker.signal_name == sig.Name(); });
                     if (it != schema_fields.end()){
-                        std::cout << "Found signal " << sig.Name() << " in schema at index " << std::distance(schema_fields.begin(), it) << " With type: " << it->arrow_type << "\n";
+                        //std::cout << "Found signal " << sig.Name() << " in schema at index " << std::distance(schema_fields.begin(), it) << " With type: " << it->arrow_type << "\n";
                         int index = std::distance(schema_fields.begin(), it);
                         // Set the value in the row_values based on the type
                         if (it->arrow_type == parquet::Type::type::FLOAT){
@@ -255,11 +244,11 @@ int main()
 
             }
             // Output row_values to parquet stream writer
-            int v = 0;
+            int v = 1;
+            os << rcv_time_ms;
             while(v < row_values.size()){
                 const auto& value = row_values[v];
-                std::cout << "Value type: " << schema_fields[v].arrow_type << " Belonging to signal: " << schema_fields[v].signal_name << "\n";
-                
+                //std::cout << "Value type: " << schema_fields[v].arrow_type << " Belonging to signal: " << schema_fields[v].signal_name << "\n";
                 if (std::holds_alternative<std::monostate>(value)) {
                     os.SkipColumns(1);
                 } else if (schema_fields[v].arrow_type == parquet::Type::type::FLOAT) {
@@ -270,18 +259,21 @@ int main()
                 v++;
             }
 
-            std::cout << "---- ROW END ----\n";
+            //std::cout << "---- ROW END ----\n";
             os << parquet::EndRow;
-            os << parquet::EndRowGroup;
-            std::cout << "--- WRITE END ---\n";
+            //os << parquet::EndRowGroup;
+            //std::cout << "--- WRITE END ---\n";
             num_packets_rx++;
-            if(num_packets_rx > 2){
-                //outfile->Close();
+
+            if (num_packets_rx % 1000 == 0){
+                std::cout << "Received " << num_packets_rx << " packets\r" << std::flush << "\n";
+                os << parquet::EndRowGroup;
+                //std::cout << outfile->Flush() << "\n";
+                //std::cout << std::flush;
                 break;
             }
-
         }
     }
-    close(s);
-    std::cout << std::flush;
+    //close(s);
+    //std::cout << std::flush;
 }
