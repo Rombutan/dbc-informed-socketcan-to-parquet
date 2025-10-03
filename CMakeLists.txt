@@ -31,8 +31,11 @@ if (TARGET dbcppp)
     # set_target_properties(dbcppp PROPERTIES OUTPUT_NAME dbcppp_cli) 
 endif()
 
+find_package(Arrow REQUIRED)
+find_package(Parquet REQUIRED)
+
 add_executable(decoder main.cpp)
 
-target_link_libraries(decoder PRIVATE dbcppp)
+target_link_libraries(decoder PRIVATE dbcppp arrow_shared parquet_shared)
 
 
