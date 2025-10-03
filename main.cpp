@@ -12,6 +12,8 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <fstream>
+#include <sstream>
 #include <unistd.h>
 
 #include <net/if.h>
@@ -19,10 +21,6 @@
 #include <sys/socket.h>
 #include <linux/can.h>
 #include <linux/can/raw.h>
-
-#ifndef SIOCGSTAMP
-#define SIOCGSTAMP 0x8906
-#endif
 
 #include "arrow/api.h"
 #include "arrow/io/api.h"
@@ -56,15 +54,131 @@ struct SignalTypeOrderTracker
     parquet::Type::type arrow_type; 
 };
 
+// for using candump only
+void parse_can_line(const std::string& line, float& timestamp, can_frame& frame) { 
+    std::stringstream ss(line);
+    char paren, hash;
+    std::string channel_id_data;
+
+    // 1. Extract Time and the rest of the string
+    // This reads: '(' , TIME, ')', ' ', and the rest into channel_id_data
+    if (!(ss >> paren >> timestamp >> paren >> channel_id_data)) {
+        //std::cerr << "Error: Failed to parse timestamp or initial format." << std::endl;
+        return;
+    }
+
+    // Example channel_id_data: "can0 000A0003#006700050FB20000"
+    
+    // 2. Extract Channel, CAN ID, and Data payload
+    // Find the space between channel ("can0") and the CAN data ("000A0003#...")
+    size_t space_pos = channel_id_data.find(' ');
+    if (space_pos == std::string::npos) {
+        std::cerr << "Error: Could not find space separator." << std::endl;
+        return;
+    }
+
+    // Isolate the "ID#DATA" part
+    std::string id_data_payload = channel_id_data.substr(space_pos + 1);
+    
+    // Find the '#' separator
+    size_t hash_pos = id_data_payload.find('#');
+    if (hash_pos == std::string::npos) {
+        std::cerr << "Error: Could not find '#' separator." << std::endl;
+        return;
+    }
+
+    std::string id_str = id_data_payload.substr(0, hash_pos);
+    std::string data_str = id_data_payload.substr(hash_pos + 1);
+
+    // 3. Convert CAN ID (Hex String to Integer)
+    // std::stoul converts string to unsigned long, using base 16 (hex)
+    frame.can_id = std::stoul(id_str, nullptr, 16);
+
+    // 4. Convert Data Payload (Hex String to Byte Array)
+    size_t data_len = data_str.length() / 2; // Two hex characters per byte
+    if (data_len > CAN_MAX_DLEN) {
+        data_len = CAN_MAX_DLEN;
+    }
+    frame.len = (unsigned char)data_len;
+
+    // Iterate through the data string, two characters at a time
+    for (size_t i = 0; i < data_len; ++i) {
+        std::string byte_str = data_str.substr(i * 2, 2);
+        // std::stoul converts the two hex chars to a byte value
+        frame.data[i] = static_cast<__u8>(std::stoul(byte_str, nullptr, 16));
+    }
+}
+
+// needed to get timestamp of beginning of file
+void peek_line(std::istream& is, std::string& line) {
+    // 1. Get the current position of the input stream pointer
+    // This marks the beginning of the line you're about to read.
+    std::streampos current_pos = is.tellg();
+
+    // 2. Read the line using the standard method (this advances the pointer)
+    if (std::getline(is, line)) {
+        // 3. Rewind the input stream pointer back to the saved position
+        is.seekg(current_pos);
+    } else {
+        // Clear the line if reading failed (e.g., end of file)
+        line.clear();
+    }
+}
+
 using ArrowSchemaList = std::vector<SignalTypeOrderTracker>;
 static std::shared_ptr<arrow::io::FileOutputStream> outfile;
 
+bool use_socketcan = true; // if false, read from candump file
+int num_packets_to_read = 100;
+std::string dbc_filename = "fs.dbc";
+std::string parquet_filename = "test.parquet";
+std::string can_interface = "vcan0";
 
-int main()
+int main(int argc, char* argv[])
 {
+    // process arguments
+    if(argc < 1){
+        std::cout << "you must provide at least a dbc file name... \n dbcparquetdecoder file.dbc [of output.parquet] [if vcan0] [socket|file] \n \"if\" is used for the interface name in socket mode and the file name in file mode \n";
+    }
+
+    int arg = 2;
+    while (arg < argc){
+        if(std::strcmp(argv[arg], "of") == 0){
+            if (arg + 1 >= argc) {
+                std::cerr << "Error: Missing filename for 'of' option.\n";
+                return 1; // Or handle error appropriately
+            }
+            std::cout << "Got output file=" << argv[arg+1] << "\n";
+            parquet_filename=argv[arg+1];
+            arg++;
+
+        } else if(std::strcmp(argv[arg], "if") == 0){
+            if (arg + 1 >= argc) {
+                std::cerr << "Error: Missing filename for 'of' option.\n";
+                return 1; // Or handle error appropriately
+            }
+            std::cout << "Got input file / can interface=" << argv[arg+1] << "\n";
+            can_interface=argv[arg+1];
+            arg++;
+        } else if(std::strcmp(argv[arg], "socket") == 0){
+            std::cout << "Using SocketCan for input\n";
+            use_socketcan = true;
+        } else if(std::strcmp(argv[arg], "file") == 0){
+            std::cout << "Using file for input\n";
+            use_socketcan = false;
+        } else {
+            std::cout << "Incorrect argument " << argv[argc] << ". Example: \n dbcparquetdecoder file.dbc [of output.parquet] [if vcan0] [socket|file] \n \"if\" is used for the interface name in socket mode and the file name in file mode \n";
+        }
+
+        arg++;
+    }
+
+    // done processing arguments
+
+
     std::unique_ptr<dbcppp::INetwork> net;
     {
-        std::ifstream idbc("fs.dbc");
+        std::ifstream idbc(dbc_filename.c_str());
         net = dbcppp::INetwork::LoadDBCFromIs(idbc);
     }
 
@@ -78,30 +192,38 @@ int main()
     {
         messages.insert(std::make_pair(msg.Id(), &msg));
     }
-    can_frame frame;
+    
 
-    // 1. Create socket
-    int s = socket(PF_CAN, SOCK_RAW, CAN_RAW);
-    if (s < 0) {
-        std::cerr << "Error while opening socket: " << strerror(errno) << std::endl;
-        return 1;
-    }
+    
+    int s; //need to instantiate here for scope reasons
+    std::ifstream infile;
 
-    // 2. Locate the interface (e.g., can0)
-    struct ifreq ifr {};
-    std::strncpy(ifr.ifr_name, "vcan0", IFNAMSIZ - 1);
-    if (ioctl(s, SIOCGIFINDEX, &ifr) < 0) {
-        std::cerr << "Error getting interface index: " << strerror(errno) << std::endl;
-        return 1;
-    }
+    if(use_socketcan){
+        // 1. Create socket
+        s = socket(PF_CAN, SOCK_RAW, CAN_RAW);
+        if (s < 0) {
+            std::cerr << "Error while opening socket: " << strerror(errno) << std::endl;
+            return 1;
+        }
 
-    // 3. Bind the socket to the CAN interface
-    struct sockaddr_can addr {};
-    addr.can_family = AF_CAN;
-    addr.can_ifindex = ifr.ifr_ifindex;
-    if (bind(s, (struct sockaddr *)&addr, sizeof(addr)) < 0) {
-        std::cerr << "Error in socket bind: " << strerror(errno) << std::endl;
-        return 1;
+        // 2. Locate the interface (e.g., can0)
+        struct ifreq ifr {};
+        std::strncpy(ifr.ifr_name, can_interface.c_str(), IFNAMSIZ - 1);
+        if (ioctl(s, SIOCGIFINDEX, &ifr) < 0) {
+            std::cerr << "Error getting interface index: " << strerror(errno) << std::endl;
+            return 1;
+        }
+
+        // 3. Bind the socket to the CAN interface
+        struct sockaddr_can addr {};
+        addr.can_family = AF_CAN;
+        addr.can_ifindex = ifr.ifr_ifindex;
+        if (bind(s, (struct sockaddr *)&addr, sizeof(addr)) < 0) {
+            std::cerr << "Error in socket bind: " << strerror(errno) << std::endl;
+            return 1;
+        }
+    } else {
+        std::ifstream infile(can_interface.c_str());
     }
 
     // Build list of signals used to match up by index, and also to construct the schema
@@ -112,7 +234,7 @@ int main()
     int i = 0;
     while (i < net->Messages_Size()){
         const dbcppp::IMessage& msg_ref = net->Messages_Get(i);
-        std::cout << "Message " << i << ": " << msg_ref.Name() << "\n";
+        //std::cout << "Message " << i << ": " << msg_ref.Name() << "\n";
         int n = 0;
         while(n<msg_ref.Signals_Size()){
             const dbcppp::ISignal& sig_ref = msg_ref.Signals_Get(n);
@@ -140,7 +262,7 @@ int main()
             } else {
                 std::cerr << "Unhandled Extended Value Type " << strerror(errno) << std::endl;
             }
-            std::cout << "\tSignal " << n << ": " << sig_ref.Name() << " type: " << type_name << "\n";
+            //std::cout << "\tSignal " << n << ": " << sig_ref.Name() << " type: " << type_name << "\n";
             n++;
         }
 
@@ -173,39 +295,60 @@ int main()
 
    PARQUET_ASSIGN_OR_THROW(
       outfile,
-      arrow::io::FileOutputStream::Open("test.parquet"));
+      arrow::io::FileOutputStream::Open(parquet_filename));
 
     parquet::WriterProperties::Builder builder;
     parquet::StreamWriter os{
-      parquet::ParquetFileWriter::Open(outfile, node, builder.build())};
+    parquet::ParquetFileWriter::Open(outfile, node, builder.build())};
 
     const auto start_time_point = std::chrono::high_resolution_clock::now();
+    float start_time_s;
+
+    can_frame fframe= {};
+
+    // get time of first can packet
+    if(!use_socketcan){
+        float timestamp = 0.0f;
+        std::string line;
+        std::getline(infile, line);
+        parse_can_line(line, timestamp, fframe);
+        start_time_s = timestamp;
+    }
 
     int num_packets_rx = 0;
 
+    can_frame frame= {};
+
     while (1)
     {
+        float rcv_time_ms;
         // receive meaningful data
-        int nbytes = read(s, &frame, sizeof(frame));
+        if(use_socketcan){
+            int nbytes = read(s, &frame, sizeof(frame));
 
-        // Get shitty system timestamp that will be off and is not race-condition safe
-        auto now_time_point = std::chrono::high_resolution_clock::now();
-        auto difference_duration = now_time_point - start_time_point;
-        float rcv_time_ms = std::chrono::duration_cast<std::chrono::duration<float, std::milli>>(difference_duration).count();
+            // Get shitty system timestamp that will be off and is not race-condition safe
+            auto now_time_point = std::chrono::high_resolution_clock::now();
+            auto difference_duration = now_time_point - start_time_point;
+            rcv_time_ms = std::chrono::duration_cast<std::chrono::duration<float, std::milli>>(difference_duration).count();
 
 
-        if (nbytes < 0) {
-	    std::cerr << "Read error: " << strerror(errno) << std::endl;
-            break;
+            if (nbytes < 0) {
+            std::cerr << "Read error: " << strerror(errno) << std::endl;
+                break;
+            }
+
+            if (nbytes < sizeof(struct can_frame)) {
+                std::cerr << "Incomplete CAN frame" << std::endl;
+                continue;
+            }
+        } else {
+            float timestamp = 0.0f;
+            std::string line;
+            std::getline(infile, line);
+            parse_can_line(line, timestamp, frame);
+
+            rcv_time_ms = (timestamp-start_time_s)*1000;
         }
-
-        if (nbytes < sizeof(struct can_frame)) {
-            std::cerr << "Incomplete CAN frame" << std::endl;
-            continue;
-        }
-
-        // Put the timestamp in only if the message passes the error and incomplete filter
-        // os << rcv_time_ms;
 
         
         auto iter = messages.find(frame.can_id);
@@ -265,7 +408,7 @@ int main()
             //std::cout << "--- WRITE END ---\n";
             num_packets_rx++;
 
-            if (num_packets_rx % 1000 == 0){
+            if (num_packets_rx % num_packets_to_read == 0){
                 std::cout << "Received " << num_packets_rx << " packets\r" << std::flush << "\n";
                 os << parquet::EndRowGroup;
                 //std::cout << outfile->Flush() << "\n";
