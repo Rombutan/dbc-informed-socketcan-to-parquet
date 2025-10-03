@@ -1,4 +1,6 @@
 # Build
+I of all people do not know what system libraries this uses. Just read the cmake errors until it works :/
+
 ```
 mkdir build
 cmake -S . -B build/
