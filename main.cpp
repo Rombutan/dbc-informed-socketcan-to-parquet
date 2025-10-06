@@ -154,12 +154,12 @@ int main(int argc, char* argv[])
 {
     // process arguments
     if(argc < 1){
-        std::cout << "you must provide at least a dbc file name... \n ./decoder file.dbc [of output.parquet] [if vcan0] [socket|file] \n \"if\" is used for the interface name in socket mode and the file name in file mode \n";
+        std::cout << "you must provide at least a dbc file name... \n ./decoder file.dbc [-of output.parquet] [-if vcan0] [-socket|-file] \n \"if\" is used for the interface name in socket mode and the file name in file mode \n";
     }
 
     int arg = 2;
     while (arg < argc){
-        if(std::strcmp(argv[arg], "of") == 0){
+        if(std::strcmp(argv[arg], "-of") == 0){
             if (arg + 1 >= argc) {
                 std::cerr << "Error: Missing filename for 'of' option.\n";
                 return 1; // Or handle error appropriately
@@ -168,7 +168,7 @@ int main(int argc, char* argv[])
             parquet_filename=argv[arg+1];
             arg++;
 
-        } else if(std::strcmp(argv[arg], "if") == 0){
+        } else if(std::strcmp(argv[arg], "-if") == 0){
             if (arg + 1 >= argc) {
                 std::cerr << "Error: Missing filename for 'of' option.\n";
                 return 1; // Or handle error appropriately
@@ -176,14 +176,14 @@ int main(int argc, char* argv[])
             std::cout << "Got input file / can interface=" << argv[arg+1] << "\n";
             can_interface=argv[arg+1];
             arg++;
-        } else if(std::strcmp(argv[arg], "socket") == 0){
+        } else if(std::strcmp(argv[arg], "-socket") == 0){
             std::cout << "Using SocketCan for input\n";
             use_socketcan = true;
-        } else if(std::strcmp(argv[arg], "file") == 0){
+        } else if(std::strcmp(argv[arg], "-file") == 0){
             std::cout << "Using file for input\n";
             use_socketcan = false;
         } else {
-            std::cout << "Incorrect argument " << argv[argc] << ". Example: \n dbcparquetdecoder file.dbc [of output.parquet] [if vcan0] [socket|file] \n \"if\" is used for the interface name in socket mode and the file name in file mode \n";
+            std::cout << "Incorrect argument " << argv[argc] << ". Example: \n dbcparquetdecoder file.dbc [-of output.parquet] [-if vcan0] [-socket|-file] \n \"if\" is used for the interface name in socket mode and the file name in file mode \n";
         }
 
         arg++;
@@ -315,7 +315,8 @@ int main(int argc, char* argv[])
 
     parquet::WriterProperties::Builder builder;
     parquet::StreamWriter os{
-    parquet::ParquetFileWriter::Open(outfile, node, builder.build())};
+        parquet::ParquetFileWriter::Open(outfile, node, builder.build())
+    };
 
     const auto start_time_point = std::chrono::high_resolution_clock::now();
     float start_time_s;
