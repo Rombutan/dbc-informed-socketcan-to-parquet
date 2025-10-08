@@ -24,11 +24,13 @@ canplayer -i -v vcan0=can0 -I candump.log
 
 # Usage
 ```
-./decoder file.dbc file.dbc [of output.parquet] [if vcan0] [socket|file]
+./decoder file.dbc [-of output.parquet] [-if vcan0] [-socket|-file] [-cache 10]
 ```
 You must always provide a dbc file and it must be the first argument. The order of the others might matter, idk.
 
 If you wish to sample from a live can interface or a replaying vcan interface as shown above, you must pass `socket` as an argument, and provide an `if` (can interface name like "can0" or "vcan2") and `of` (desired file name of parquet output)
+
+If you want to cache some period of messages into a single database row, use the `-cache` argument followed by a float or int with unit ms. The timestamp of each output row will be that of the first message which is cached into that row.
 
 For Example:
 ```
