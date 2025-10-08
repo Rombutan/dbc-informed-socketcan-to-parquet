@@ -153,12 +153,13 @@ int num_packets_to_read = 1000;
 std::string dbc_filename = "fs.dbc";
 std::string parquet_filename = "test.parquet";
 std::string can_interface = "vcan0";
+double cache_ms = 0;
 
 int main(int argc, char* argv[])
 {
     // process arguments
     if(argc < 1){
-        std::cout << "you must provide at least a dbc file name... \n ./decoder file.dbc [-of output.parquet] [-if vcan0] [-socket|-file] \n \"if\" is used for the interface name in socket mode and the file name in file mode \n";
+        std::cout << "you must provide at least a dbc file name... \n ./decoder file.dbc [-of output.parquet] [-if vcan0] [-socket|-file] [-cache 10] \n \"if\" is used for the interface name in socket mode and the file name in file mode \n";
     }
 
     int arg = 2;
@@ -186,12 +187,21 @@ int main(int argc, char* argv[])
         } else if(std::strcmp(argv[arg], "-file") == 0){
             std::cout << "Using file for input\n";
             use_socketcan = false;
+        } else if(std::strcmp(argv[arg], "-cache") == 0)  {
+            if (arg + 1 >= argc) {
+                std::cerr << "Error: Missing caching period in ms.\n";
+                return 1; // Or handle error appropriately
+            }
+            std::cout << "Got caching period=" << argv[arg+1] << "ms\n";
+            cache_ms = std::stod(argv[arg+1]);
+            arg++;
         } else {
-            std::cout << "Incorrect argument " << argv[argc] << ". Example: \n dbcparquetdecoder file.dbc [-of output.parquet] [-if vcan0] [-socket|-file] \n \"if\" is used for the interface name in socket mode and the file name in file mode \n";
+            std::cout << "Incorrect argument " << argv[argc] << ". Example: \n ./decoder file.dbc [-of output.parquet] [-if vcan0] [-socket|-file] [-cache 10] \n \"if\" is used for the interface name in socket mode and the file name in file mode \n";
         }
 
         arg++;
     }
+    //std::cout.flush();
 
     // done processing arguments
 
@@ -345,6 +355,10 @@ int main(int argc, char* argv[])
 
     can_frame frame= {};
 
+    std::vector<std::variant<std::monostate, double, int32_t>> cache_object;
+    cache_object.reserve(schema_fields.size());
+    double cache_start_ms = 0;
+
     while (1)
     {
         double rcv_time_ms;
@@ -427,22 +441,70 @@ int main(int argc, char* argv[])
             }
             // Output row_values to parquet stream writer
             int v = 1;
-            os << rcv_time_ms;
-            while(v < row_values.size()){
-                const auto& value = row_values[v];
-                //std::cout << "Value type: " << schema_fields[v].arrow_type << " Belonging to signal: " << schema_fields[v].signal_name << "\n";
-                if (std::holds_alternative<std::monostate>(value)) {
-                    os.SkipColumns(1);
-                } else if (schema_fields[v].arrow_type == parquet::Type::type::DOUBLE) {
-                    os << std::get<double>(value);
-                } else if (schema_fields[v].arrow_type == parquet::Type::type::INT32) {
-                    os << std::get<int32_t>(value);
+            if(cache_ms < 0.1){
+                os << rcv_time_ms;
+                while(v < row_values.size()){
+                    const auto& value = row_values[v];
+                    //std::cout << "Value type: " << schema_fields[v].arrow_type << " Belonging to signal: " << schema_fields[v].signal_name << "\n";
+                    if (std::holds_alternative<std::monostate>(value)) {
+                        os.SkipColumns(1);
+                    } else if (schema_fields[v].arrow_type == parquet::Type::type::DOUBLE) {
+                        os << std::get<double>(value);
+                    } else if (schema_fields[v].arrow_type == parquet::Type::type::INT32) {
+                        os << std::get<int32_t>(value);
+                    }
+                    v++;
                 }
-                v++;
+                os << parquet::EndRow;
+            } else {
+                v = 1;
+                while(v < row_values.size()){
+                    const auto& value = row_values[v];
+                    if (std::holds_alternative<std::monostate>(value)) {
+                    } else if (schema_fields[v].arrow_type == parquet::Type::type::DOUBLE) {
+                        cache_object[v] = std::get<double>(value);
+                        std::cout << std::get<double>(cache_object[v]) << "\n";
+                    } else if (schema_fields[v].arrow_type == parquet::Type::type::INT32) {
+                        cache_object[v] = std::get<int32_t>(value);
+                        std::cout << std::get<int32_t>(cache_object[v]) << "\n";
+                    }
+                    v++;
+                }
+
+                //std::cout << "RCV Time: " << rcv_time_ms << "   Cache Start Time: " << cache_start_ms << "\n";
+
+                if (rcv_time_ms > cache_start_ms+cache_ms){
+                    int not_monostate = 0;
+                    int tps = 0;
+                    while (tps < cache_object.size()){
+                        if (!std::holds_alternative<std::monostate>(cache_object[tps])){
+                            not_monostate++;
+                        }
+                        tps++;
+                    }
+                    
+                    std::cout << "Outputing cached row with " << not_monostate << "/" << cache_object.size() << "\n";
+
+                    cache_start_ms = rcv_time_ms;
+                    v=1;
+                    os << cache_start_ms;
+                    while(v < row_values.size()){
+                        const auto& value = cache_object[v];
+                        //std::cout << "Value type: " << schema_fields[v].arrow_type << " Belonging to signal: " << schema_fields[v].signal_name << "\n";
+                        if (std::holds_alternative<std::monostate>(value)) {
+                            os.SkipColumns(1);
+                        } else if (schema_fields[v].arrow_type == parquet::Type::type::DOUBLE) {
+                            os << std::get<double>(value);
+                        } else if (schema_fields[v].arrow_type == parquet::Type::type::INT32) {
+                            os << std::get<int32_t>(value);
+                        }
+                        v++;
+                    }
+                    os << parquet::EndRow;
+                }
             }
 
             //std::cout << "---- ROW END ----\n";
-            os << parquet::EndRow;
             //os << parquet::EndRowGroup;
             //std::cout << "--- WRITE END ---\n";
             num_packets_rx++;
