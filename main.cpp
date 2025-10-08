@@ -64,7 +64,7 @@ static inline void trim(std::string &s) {
     s.erase(0, i);
 }
 
-void parse_can_line(const std::string line, float& timestamp, can_frame& frame, bool& good) { 
+void parse_can_line(const std::string line, double& timestamp, can_frame& frame, bool& good) { 
     std::string clean = line;
     // trim trailing CR/LF
     while (!clean.empty() && (clean.back() == '\r' || clean.back() == '\n'))
@@ -81,7 +81,9 @@ void parse_can_line(const std::string line, float& timestamp, can_frame& frame, 
 
     if (!(iss >> ts_block >> channel >> iddata)) {
         std::cerr << "DEBUG: input=[" << clean << "]\n";
-        throw std::runtime_error("parse_can_line: unable to split line into 3 fields");
+        std::cout <<("parse_can_line: unable to split line into 3 fields");
+        good=false;
+        return;
     }
 
     // now extract timestamp
@@ -89,7 +91,9 @@ void parse_can_line(const std::string line, float& timestamp, can_frame& frame, 
         throw std::runtime_error("parse_can_line: bad timestamp format: " + ts_block);
     }
     std::string ts_str = ts_block.substr(1, ts_block.size() - 2);
-    timestamp = std::stof(ts_str);
+    timestamp = std::stod(ts_str);
+    //std::cout << "Timestamp String: " << ts_str << "\n";
+    //std::cout << "Timestamp Parsed: " <<  std::stod(ts_str) << "\n";
     
     std::string id_data_payload = iddata;
     
@@ -245,7 +249,7 @@ int main(int argc, char* argv[])
     // Build list of signals used to match up by index, and also to construct the schema
     ArrowSchemaList schema_fields;
 
-    schema_fields.push_back(SignalTypeOrderTracker{"Time_ms", parquet::Type::type::FLOAT}); // First column is always timestamp
+    schema_fields.push_back(SignalTypeOrderTracker{"Time_ms", parquet::Type::type::DOUBLE}); // First column is always timestamp
 
     int i = 0;
     while (i < net->Messages_Size()){
@@ -270,7 +274,7 @@ int main(int argc, char* argv[])
                     signal.arrow_type = parquet::Type::type::INT32;
                 } else {
                     std::strncpy(type_name, "float", 5);
-                    signal.arrow_type = parquet::Type::type::FLOAT;
+                    signal.arrow_type = parquet::Type::type::DOUBLE;
                 }
                 schema_fields.push_back(std::move(signal));
 
@@ -290,7 +294,7 @@ int main(int argc, char* argv[])
 
     for (const auto& sig_ptr : schema_fields)
     {
-        if(sig_ptr.arrow_type == parquet::Type::type::FLOAT){
+        if(sig_ptr.arrow_type == parquet::Type::type::DOUBLE){
             //std::cout << "Signal: " << sig_ptr.signal_name << " type: " << static_cast<int>(sig_ptr.arrow_type) << "\n";
             fields.push_back(parquet::schema::PrimitiveNode::Make(
                 sig_ptr.signal_name, parquet::Repetition::OPTIONAL, sig_ptr.arrow_type, parquet::ConvertedType::NONE));
@@ -319,13 +323,13 @@ int main(int argc, char* argv[])
     };
 
     const auto start_time_point = std::chrono::high_resolution_clock::now();
-    float start_time_s;
+    double start_time_s;
 
     can_frame fframe= {};
 
     // get time of first can packet
     if(!use_socketcan){
-        float timestamp = 0.0f;
+        double timestamp;
         std::string line;
         std::getline(infile, line);
         bool good = false;
@@ -334,6 +338,7 @@ int main(int argc, char* argv[])
         }
         
         start_time_s = timestamp;
+        //std::cout << "Start Time of Can Log (epoch): " << timestamp << "\n"; 
     }
 
     int num_packets_rx = 0;
@@ -342,7 +347,7 @@ int main(int argc, char* argv[])
 
     while (1)
     {
-        float rcv_time_ms;
+        double rcv_time_ms;
         // receive meaningful data
         if(use_socketcan){
             int nbytes = read(s, &frame, sizeof(frame));
@@ -350,7 +355,7 @@ int main(int argc, char* argv[])
             // Get shitty system timestamp that will be off and is not race-condition safe
             auto now_time_point = std::chrono::high_resolution_clock::now();
             auto difference_duration = now_time_point - start_time_point;
-            rcv_time_ms = std::chrono::duration_cast<std::chrono::duration<float, std::milli>>(difference_duration).count();
+            rcv_time_ms = std::chrono::duration_cast<std::chrono::duration<double, std::milli>>(difference_duration).count();
 
 
             if (nbytes < 0) {
@@ -363,7 +368,7 @@ int main(int argc, char* argv[])
                 continue;
             }
         } else {
-            float timestamp = 0.0f;
+            double timestamp;
             std::string line;
             std::getline(infile, line);
             bool good = false;
@@ -380,6 +385,8 @@ int main(int argc, char* argv[])
             }
 
             rcv_time_ms = (timestamp-start_time_s)*1000;
+            //std::cout << std::setprecision(20) << "Message Delta Timestamp: " << rcv_time_ms << "   Message abs Timestamp" << timestamp << "\n";
+
         }
 
         
@@ -388,7 +395,7 @@ int main(int argc, char* argv[])
         if (iter != messages.end())
         {
             // Create a row of empty values to be filled in.. no idea what monostate is but chatgpt said to use it
-            std::vector<std::variant<std::monostate, float, int32_t>> row_values(schema_fields.size(), std::monostate{});
+            std::vector<std::variant<std::monostate, double, int32_t>> row_values(schema_fields.size(), std::monostate{});
 
             const dbcppp::IMessage* msg = iter->second;
             //std::cout << "Received Message: " << msg->Name() << "\n";
@@ -406,8 +413,8 @@ int main(int argc, char* argv[])
                         //std::cout << "Found signal " << sig.Name() << " in schema at index " << std::distance(schema_fields.begin(), it) << " With type: " << it->arrow_type << "\n";
                         int index = std::distance(schema_fields.begin(), it);
                         // Set the value in the row_values based on the type
-                        if (it->arrow_type == parquet::Type::type::FLOAT){
-                            row_values[index] = static_cast<float>(sig.RawToPhys(sig.Decode(frame.data)));
+                        if (it->arrow_type == parquet::Type::type::DOUBLE){
+                            row_values[index] = static_cast<double>(sig.RawToPhys(sig.Decode(frame.data)));
                         } else if (it->arrow_type == parquet::Type::type::INT32){
                             row_values[index] = static_cast<int32_t>(sig.RawToPhys(sig.Decode(frame.data)));
                         } else {
@@ -426,8 +433,8 @@ int main(int argc, char* argv[])
                 //std::cout << "Value type: " << schema_fields[v].arrow_type << " Belonging to signal: " << schema_fields[v].signal_name << "\n";
                 if (std::holds_alternative<std::monostate>(value)) {
                     os.SkipColumns(1);
-                } else if (schema_fields[v].arrow_type == parquet::Type::type::FLOAT) {
-                    os << std::get<float>(value);
+                } else if (schema_fields[v].arrow_type == parquet::Type::type::DOUBLE) {
+                    os << std::get<double>(value);
                 } else if (schema_fields[v].arrow_type == parquet::Type::type::INT32) {
                     os << std::get<int32_t>(value);
                 }
