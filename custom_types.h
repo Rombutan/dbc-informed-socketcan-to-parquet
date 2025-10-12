@@ -22,7 +22,8 @@ struct SignalTypeOrderTracker
 };
 
 // Stores monostate (for null column, or double, or 32/64/128 signed int, or float/double, or bool) to closely match parquet types
-using DataTypeOrVoid = std::variant<std::monostate, double, int32_t, __int128_t, float, bool>;
+using DataTypeOrVoid = std::variant<std::monostate, double, int32_t, int64_t, __int128_t, float, bool>;
+
 
 
 #endif

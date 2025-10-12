@@ -130,12 +130,23 @@ int main(int argc, char* argv[])
             } else if (ev_type == dbcppp::ISignal::EExtendedValueType::Integer){
                 SignalTypeOrderTracker signal;
                 signal.signal_name = sig_ref.Name();
-                if (sig_ref.Factor() == 1.0){
+                if (sig_ref.BitSize() == 1){
+                    std::strncpy(type_name, "bool ", 5);
+                    signal.arrow_type = parquet::Type::type::BOOLEAN;
+                } else if (sig_ref.Factor() < 1.0001 && sig_ref.Factor() > 9.9999){
                     std::strncpy(type_name, "int  ", 5);
                     signal.arrow_type = parquet::Type::type::INT32;
+                    if (sig_ref.BitSize() > 30){
+                        signal.arrow_type = parquet::Type::type::INT64;
+                    } else if (sig_ref.BitSize() > 62){
+                        signal.arrow_type = parquet::Type::type::INT96;
+                    }
                 } else {
                     std::strncpy(type_name, "float", 5);
                     signal.arrow_type = parquet::Type::type::DOUBLE;
+                    if (sig_ref.BitSize() < 32){
+                        signal.arrow_type = parquet::Type::type::FLOAT;
+                    }
                 }
                 schema_fields.push_back(std::move(signal));
 
@@ -155,16 +166,8 @@ int main(int argc, char* argv[])
 
     for (const auto& sig_ptr : schema_fields)
     {
-        if(sig_ptr.arrow_type == parquet::Type::type::DOUBLE){
-            //std::cout << "Signal: " << sig_ptr.signal_name << " type: " << static_cast<int>(sig_ptr.arrow_type) << "\n";
-            fields.push_back(parquet::schema::PrimitiveNode::Make(
-                sig_ptr.signal_name, parquet::Repetition::OPTIONAL, sig_ptr.arrow_type, parquet::ConvertedType::NONE));
-        } else if(sig_ptr.arrow_type == parquet::Type::type::INT32){
-            //std::cout << "Signal: " << sig_ptr.signal_name << " type: " << static_cast<int>(sig_ptr.arrow_type) << "\n";
-            fields.push_back(parquet::schema::PrimitiveNode::Make(
-                sig_ptr.signal_name, parquet::Repetition::OPTIONAL, sig_ptr.arrow_type, parquet::ConvertedType::INT_32));
-        }
-
+        fields.push_back(parquet::schema::PrimitiveNode::Make(
+            sig_ptr.signal_name, parquet::Repetition::OPTIONAL, sig_ptr.arrow_type, parquet::ConvertedType::NONE));
     }
 
     auto node = std::static_pointer_cast<parquet::schema::GroupNode>(
@@ -280,8 +283,16 @@ int main(int argc, char* argv[])
                         // Set the value in the row_values based on the type
                         if (it->arrow_type == parquet::Type::type::DOUBLE){
                             row_values[index] = static_cast<double>(sig.RawToPhys(sig.Decode(frame.data)));
+                        } else if (it->arrow_type == parquet::Type::type::FLOAT){
+                            row_values[index] = static_cast<float>(sig.RawToPhys(sig.Decode(frame.data)));
                         } else if (it->arrow_type == parquet::Type::type::INT32){
                             row_values[index] = static_cast<int32_t>(sig.RawToPhys(sig.Decode(frame.data)));
+                        } else if (it->arrow_type == parquet::Type::type::INT64){
+                            row_values[index] = static_cast<int64_t>(sig.RawToPhys(sig.Decode(frame.data)));
+                        } else if (it->arrow_type == parquet::Type::type::INT96){
+                            row_values[index] = static_cast<__int128_t>(sig.RawToPhys(sig.Decode(frame.data)));
+                        } else if (it->arrow_type == parquet::Type::type::BOOLEAN){
+                            row_values[index] = static_cast<bool>(sig.RawToPhys(sig.Decode(frame.data)));
                         } else {
                             std::cerr << "Unhandled arrow type for signal " << sig.Name() << "\n";
                         }
@@ -301,8 +312,19 @@ int main(int argc, char* argv[])
                         os.SkipColumns(1);
                     } else if (schema_fields[v].arrow_type == parquet::Type::type::DOUBLE) {
                         os << std::get<double>(value);
+                    } else if (schema_fields[v].arrow_type == parquet::Type::type::FLOAT) {
+                        os << std::get<float>(value);
                     } else if (schema_fields[v].arrow_type == parquet::Type::type::INT32) {
                         os << std::get<int32_t>(value);
+                    } else if (schema_fields[v].arrow_type == parquet::Type::type::INT64) {
+                        os << std::get<int64_t>(value);
+                    } else if (schema_fields[v].arrow_type == parquet::Type::type::INT96) {
+                        std::cerr << "WARNING.. BIG INTS CURRENTLY UNHANDLED\n";
+                        os << std::get<int64_t>(value);
+                    } else if (schema_fields[v].arrow_type == parquet::Type::type::BOOLEAN) {
+                        os << std::get<bool>(value);
+                    } else {
+                        std::cerr << "smth kerfuckedered\n";
                     }
                     v++;
                 }
@@ -314,26 +336,27 @@ int main(int argc, char* argv[])
                     if (std::holds_alternative<std::monostate>(value)) {
                     } else if (schema_fields[v].arrow_type == parquet::Type::type::DOUBLE) {
                         cache_object[v] = std::get<double>(value);
+                    } else if (schema_fields[v].arrow_type == parquet::Type::type::FLOAT) {
+                        cache_object[v] = std::get<float>(value);
                     } else if (schema_fields[v].arrow_type == parquet::Type::type::INT32) {
                         cache_object[v] = std::get<int32_t>(value);
+                    } else if (schema_fields[v].arrow_type == parquet::Type::type::INT64) {
+                        cache_object[v] = std::get<int32_t>(value);
+                    } else if (schema_fields[v].arrow_type == parquet::Type::type::INT96) {
+                        cache_object[v] = std::get<int64_t>(value);
+                        std::cerr << "WARNING.. BIG INTS CURRENTLY UNHANDLED\n";
+                    } else if (schema_fields[v].arrow_type == parquet::Type::type::BOOLEAN) {
+                        cache_object[v] = std::get<bool>(value);
+                    } else {
+                        std::cerr << "smth kerfuckedered mk2\n";
                     }
                     v++;
                 }
 
-                //std::cout << "RCV Time: " << rcv_time_ms << "   Cache Start Time: " << cache_start_ms << "\n";
-
+                // Output cached row
                 if (rcv_time_ms > cache_start_ms+args.cache_ms){
-                    int not_monostate = 0;
-                    int tps = 0;
-                    while (tps < cache_object.size()){
-                        if (!std::holds_alternative<std::monostate>(cache_object[tps])){
-                            not_monostate++;
-                        }
-                        tps++;
-                    }
+                
                     
-                    std::cout << "Outputing cached row with " << not_monostate << "/" << cache_object.size() << "\n";
-
                     cache_start_ms = rcv_time_ms;
                     v=1;
                     os << cache_start_ms;
@@ -341,11 +364,22 @@ int main(int argc, char* argv[])
                         const auto& value = cache_object[v];
                         //std::cout << "Value type: " << schema_fields[v].arrow_type << " Belonging to signal: " << schema_fields[v].signal_name << "\n";
                         if (std::holds_alternative<std::monostate>(value)) {
-                            os.SkipColumns(1);
+                        os.SkipColumns(1);
                         } else if (schema_fields[v].arrow_type == parquet::Type::type::DOUBLE) {
                             os << std::get<double>(value);
+                        } else if (schema_fields[v].arrow_type == parquet::Type::type::FLOAT) {
+                            os << std::get<float>(value);
                         } else if (schema_fields[v].arrow_type == parquet::Type::type::INT32) {
                             os << std::get<int32_t>(value);
+                        } else if (schema_fields[v].arrow_type == parquet::Type::type::INT64) {
+                            os << std::get<int64_t>(value);
+                        } else if (schema_fields[v].arrow_type == parquet::Type::type::INT96) {
+                            std::cerr << "WARNING.. BIG INTS CURRENTLY UNHANDLED\n";
+                            os << std::get<int64_t>(value);
+                        } else if (schema_fields[v].arrow_type == parquet::Type::type::BOOLEAN) {
+                            os << std::get<bool>(value);
+                        } else {
+                            std::cerr << "smth kerfuckedered\n";
                         }
                         v++;
                     }
