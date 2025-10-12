@@ -145,6 +145,9 @@ void peek_line(std::istream& is, std::string& line) {
     }
 }
 
+using DataTypeOrVoid = std::variant<std::monostate, double, int32_t, __int128_t, float, bool>;
+
+
 using ArrowSchemaList = std::vector<SignalTypeOrderTracker>;
 static std::shared_ptr<arrow::io::FileOutputStream> outfile;
 
@@ -355,7 +358,7 @@ int main(int argc, char* argv[])
 
     can_frame frame= {};
 
-    std::vector<std::variant<std::monostate, double, int32_t>> cache_object;
+    std::vector<DataTypeOrVoid> cache_object;
     cache_object.reserve(schema_fields.size());
     double cache_start_ms = 0;
 
@@ -409,7 +412,7 @@ int main(int argc, char* argv[])
         if (iter != messages.end())
         {
             // Create a row of empty values to be filled in.. no idea what monostate is but chatgpt said to use it
-            std::vector<std::variant<std::monostate, double, int32_t>> row_values(schema_fields.size(), std::monostate{});
+            std::vector<DataTypeOrVoid> row_values(schema_fields.size(), std::monostate{});
 
             const dbcppp::IMessage* msg = iter->second;
             //std::cout << "Received Message: " << msg->Name() << "\n";
@@ -463,10 +466,8 @@ int main(int argc, char* argv[])
                     if (std::holds_alternative<std::monostate>(value)) {
                     } else if (schema_fields[v].arrow_type == parquet::Type::type::DOUBLE) {
                         cache_object[v] = std::get<double>(value);
-                        std::cout << std::get<double>(cache_object[v]) << "\n";
                     } else if (schema_fields[v].arrow_type == parquet::Type::type::INT32) {
                         cache_object[v] = std::get<int32_t>(value);
-                        std::cout << std::get<int32_t>(cache_object[v]) << "\n";
                     }
                     v++;
                 }
