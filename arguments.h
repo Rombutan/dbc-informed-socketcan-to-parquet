@@ -18,7 +18,7 @@ struct CommandLineArugments {
     std::string dbc_filename = "fs.dbc";
     std::string parquet_filename = "test.parquet";
     std::string can_interface = "vcan0";
-    double cache_ms = 0;
+    double cache_ms = 0.0;
 };
 
 CommandLineArugments parse_cli_arguments(int argc, char* argv[]){
