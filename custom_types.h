@@ -1,27 +1,5 @@
 #ifndef CUSTOM_TYPES_H
 #define CUSTOM_TYPES_H
-#include <fstream>
-#include <unordered_map>
-
-#include "dbcppp/CApi.h"
-#include "dbcppp/Network.h"
-
-#include <iostream>
-#include <cstring>
-#include <cerrno>
-
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
-#include <fstream>
-#include <sstream>
-#include <unistd.h>
-
-#include <net/if.h>
-#include <sys/ioctl.h>
-#include <sys/socket.h>
-#include <linux/can.h>
-#include <linux/can/raw.h>
 
 #include "arrow/api.h"
 #include "arrow/io/api.h"
@@ -29,9 +7,6 @@
 #include "parquet/arrow/writer.h"
 #include "parquet/api/writer.h"
 #include "parquet/stream_writer.h"
-#include "arrow/io/file.h"
-
-#include <chrono>
 
 
 using canid_t = uint32_t;

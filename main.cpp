@@ -32,9 +32,12 @@
 
 #include <chrono>
 
+// In this project
+#include "custom_types.h"
+#include "arguments.h"
+
 
 // from uapi/linux/can.h
-using canid_t = uint32_t;
 //struct can_frame
 //{
 //	canid_t    can_id;  /* 32 bit CAN_ID + EFF/RTR/ERR flags */
@@ -44,15 +47,6 @@ using canid_t = uint32_t;
 //	uint8_t    __res1;  /* reserved / padding */
 //	uint8_t    data[8];
 //};
-
-struct SignalTypeOrderTracker
-{
-    // The name of the CAN signal (e.g., "Engine_Speed")
-    std::string signal_name; 
-    
-    // Arrow style type of the signal (will either be float, or int... but maybe we'll extend to treat bool as bool and not int in the future)
-    parquet::Type::type arrow_type; 
-};
 
 // for using candump only
 static inline void trim(std::string &s) {
@@ -145,73 +139,21 @@ void peek_line(std::istream& is, std::string& line) {
     }
 }
 
-using DataTypeOrVoid = std::variant<std::monostate, double, int32_t, __int128_t, float, bool>;
 
 
 using ArrowSchemaList = std::vector<SignalTypeOrderTracker>;
 static std::shared_ptr<arrow::io::FileOutputStream> outfile;
 
-bool use_socketcan = true; // if false, read from candump file
-int num_packets_to_read = 1000;
-std::string dbc_filename = "fs.dbc";
-std::string parquet_filename = "test.parquet";
-std::string can_interface = "vcan0";
-double cache_ms = 0;
+
 
 int main(int argc, char* argv[])
 {
-    // process arguments
-    if(argc < 1){
-        std::cout << "you must provide at least a dbc file name... \n ./decoder file.dbc [-of output.parquet] [-if vcan0] [-socket|-file] [-cache 10] \n \"if\" is used for the interface name in socket mode and the file name in file mode \n";
-    }
-
-    int arg = 2;
-    while (arg < argc){
-        if(std::strcmp(argv[arg], "-of") == 0){
-            if (arg + 1 >= argc) {
-                std::cerr << "Error: Missing filename for 'of' option.\n";
-                return 1; // Or handle error appropriately
-            }
-            std::cout << "Got output file=" << argv[arg+1] << "\n";
-            parquet_filename=argv[arg+1];
-            arg++;
-
-        } else if(std::strcmp(argv[arg], "-if") == 0){
-            if (arg + 1 >= argc) {
-                std::cerr << "Error: Missing filename for 'of' option.\n";
-                return 1; // Or handle error appropriately
-            }
-            std::cout << "Got input file / can interface=" << argv[arg+1] << "\n";
-            can_interface=argv[arg+1];
-            arg++;
-        } else if(std::strcmp(argv[arg], "-socket") == 0){
-            std::cout << "Using SocketCan for input\n";
-            use_socketcan = true;
-        } else if(std::strcmp(argv[arg], "-file") == 0){
-            std::cout << "Using file for input\n";
-            use_socketcan = false;
-        } else if(std::strcmp(argv[arg], "-cache") == 0)  {
-            if (arg + 1 >= argc) {
-                std::cerr << "Error: Missing caching period in ms.\n";
-                return 1; // Or handle error appropriately
-            }
-            std::cout << "Got caching period=" << argv[arg+1] << "ms\n";
-            cache_ms = std::stod(argv[arg+1]);
-            arg++;
-        } else {
-            std::cout << "Incorrect argument " << argv[argc] << ". Example: \n ./decoder file.dbc [-of output.parquet] [-if vcan0] [-socket|-file] [-cache 10] \n \"if\" is used for the interface name in socket mode and the file name in file mode \n";
-        }
-
-        arg++;
-    }
-    //std::cout.flush();
-
-    // done processing arguments
-
+    
+    CommandLineArugments args = parse_cli_arguments(argc, argv);
 
     std::unique_ptr<dbcppp::INetwork> net;
     {
-        std::ifstream idbc(dbc_filename.c_str());
+        std::ifstream idbc(args.dbc_filename.c_str());
         net = dbcppp::INetwork::LoadDBCFromIs(idbc);
     }
 
@@ -231,7 +173,7 @@ int main(int argc, char* argv[])
     int s; //need to instantiate here for scope reasons
     std::ifstream infile;
 
-    if(use_socketcan){
+    if(args.use_socketcan){
         // 1. Create socket
         s = socket(PF_CAN, SOCK_RAW, CAN_RAW);
         if (s < 0) {
@@ -241,7 +183,7 @@ int main(int argc, char* argv[])
 
         // 2. Locate the interface (e.g., can0)
         struct ifreq ifr {};
-        std::strncpy(ifr.ifr_name, can_interface.c_str(), IFNAMSIZ - 1);
+        std::strncpy(ifr.ifr_name, args.can_interface.c_str(), IFNAMSIZ - 1);
         if (ioctl(s, SIOCGIFINDEX, &ifr) < 0) {
             std::cerr << "Error getting interface index: " << strerror(errno) << std::endl;
             return 1;
@@ -256,7 +198,7 @@ int main(int argc, char* argv[])
             return 1;
         }
     } else {
-        infile = std::ifstream(can_interface.c_str());
+        infile = std::ifstream(args.can_interface.c_str());
     }
 
     // Build list of signals used to match up by index, and also to construct the schema
@@ -328,7 +270,7 @@ int main(int argc, char* argv[])
 
    PARQUET_ASSIGN_OR_THROW(
       outfile,
-      arrow::io::FileOutputStream::Open(parquet_filename));
+      arrow::io::FileOutputStream::Open(args.parquet_filename));
 
     parquet::WriterProperties::Builder builder;
     parquet::StreamWriter os{
@@ -341,7 +283,7 @@ int main(int argc, char* argv[])
     can_frame fframe= {};
 
     // get time of first can packet
-    if(!use_socketcan){
+    if(!args.use_socketcan){
         double timestamp;
         std::string line;
         std::getline(infile, line);
@@ -366,7 +308,7 @@ int main(int argc, char* argv[])
     {
         double rcv_time_ms;
         // receive meaningful data
-        if(use_socketcan){
+        if(args.use_socketcan){
             int nbytes = read(s, &frame, sizeof(frame));
 
             // Get shitty system timestamp that will be off and is not race-condition safe
@@ -444,7 +386,7 @@ int main(int argc, char* argv[])
             }
             // Output row_values to parquet stream writer
             int v = 1;
-            if(cache_ms < 0.1){
+            if(args.cache_ms < 0.1){
                 os << rcv_time_ms;
                 while(v < row_values.size()){
                     const auto& value = row_values[v];
@@ -474,7 +416,7 @@ int main(int argc, char* argv[])
 
                 //std::cout << "RCV Time: " << rcv_time_ms << "   Cache Start Time: " << cache_start_ms << "\n";
 
-                if (rcv_time_ms > cache_start_ms+cache_ms){
+                if (rcv_time_ms > cache_start_ms+args.cache_ms){
                     int not_monostate = 0;
                     int tps = 0;
                     while (tps < cache_object.size()){
@@ -510,12 +452,12 @@ int main(int argc, char* argv[])
             //std::cout << "--- WRITE END ---\n";
             num_packets_rx++;
 
-            if (num_packets_rx % num_packets_to_read == 0){
+            if (num_packets_rx % args.num_packets_to_read == 0){
                 std::cout << "Received " << num_packets_rx << " packets\r" << std::flush << "\n";
                 os << parquet::EndRowGroup;
                 //std::cout << outfile->Flush() << "\n";
                 //std::cout << std::flush;
-                if(use_socketcan){
+                if(args.use_socketcan){
                     break;
                 }
             }
