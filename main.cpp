@@ -79,7 +79,7 @@ int main(int argc, char* argv[])
     int s; //need to instantiate here for scope reasons
     std::ifstream infile;
 
-    if(args.use_socketcan){
+    if(args.input == SOCKETCAN){
         // 1. Create socket
         s = socket(PF_CAN, SOCK_RAW, CAN_RAW);
         if (s < 0) {
@@ -103,7 +103,7 @@ int main(int argc, char* argv[])
             std::cerr << "Error in socket bind: " << strerror(errno) << std::endl;
             return 1;
         }
-    } else {
+    } else if (args.input == CANDUMP) {
         infile = std::ifstream(args.can_interface.c_str());
     }
 
@@ -192,7 +192,7 @@ int main(int argc, char* argv[])
     can_frame fframe= {};
 
     // get time of first can packet
-    if(!args.use_socketcan){
+    if(args.input == CANDUMP){
         double timestamp;
         std::string line;
         std::getline(infile, line);
@@ -215,7 +215,7 @@ int main(int argc, char* argv[])
     {
         double rcv_time_ms;
         // receive meaningful data
-        if(args.use_socketcan){
+        if(args.input == SOCKETCAN){
             int nbytes = read(s, &frame, sizeof(frame));
 
             // Get shitty system timestamp that will be off and is not race-condition safe
@@ -280,6 +280,7 @@ int main(int argc, char* argv[])
                     // Find the index of this signal in the schema list
                     auto it = std::find_if(schema_fields.begin(), schema_fields.end(),
                         [&sig](const SignalTypeOrderTracker& tracker) { return tracker.signal_name == sig.Name(); });
+                    
                     if (it != schema_fields.end()){
                         //std::cout << "Found signal " << sig.Name() << " in schema at index " << std::distance(schema_fields.begin(), it) << " With type: " << it->arrow_type << "\n";
                         int index = std::distance(schema_fields.begin(), it);
@@ -304,7 +305,7 @@ int main(int argc, char* argv[])
                 }
 
             }
-            // Output row_values to parquet stream writer
+            // Put row_values into cache, unless null. 
             int v = 1;
 
             while(v < row_values.size()){
@@ -331,8 +332,6 @@ int main(int argc, char* argv[])
 
             // Output cached row
             if (rcv_time_ms > cache_start_ms+args.cache_ms){
-            
-                
                 cache_start_ms = rcv_time_ms;
                 v=1;
                 os << cache_start_ms;
@@ -378,7 +377,7 @@ int main(int argc, char* argv[])
                 os << parquet::EndRowGroup;
                 //std::cout << outfile->Flush() << "\n";
                 //std::cout << std::flush;
-                if(args.use_socketcan){
+                if(args.input == SOCKETCAN){
                     break;
                 }
             }

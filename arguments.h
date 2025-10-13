@@ -10,10 +10,14 @@
 #include <string.h>
 
 
-
+enum source{
+    SOCKETCAN,
+    CANDUMP,
+    TCPSTREAM
+};
 
 struct CommandLineArugments {
-    bool use_socketcan = true; // if false, read from candump file
+    source input = CANDUMP; 
     int num_packets_to_read = 1000;
     std::string dbc_filename = "fs.dbc";
     std::string parquet_filename = "test.parquet";
@@ -46,10 +50,10 @@ CommandLineArugments parse_cli_arguments(int argc, char* argv[]){
             arg++;
         } else if(std::strcmp(argv[arg], "-socket") == 0){
             std::cout << "Using SocketCan for input\n";
-            args_out.use_socketcan = true;
+            args_out.input = SOCKETCAN;
         } else if(std::strcmp(argv[arg], "-file") == 0){
             std::cout << "Using file for input\n";
-            args_out.use_socketcan = false;
+            args_out.input = CANDUMP;
         } else if(std::strcmp(argv[arg], "-cache") == 0)  {
             if (arg + 1 >= argc) {
                 std::cerr << "Error: Missing caching period in ms; No caching active.\n";
