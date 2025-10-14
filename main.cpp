@@ -206,9 +206,12 @@ int main(int argc, char* argv[])
     } else if (args.input == STDIN){ // This does not currently work with nc
         double timestamp;
         std::string line;
-        while (line.size()  < 1){
+        do {
             std::getline(std::cin, line);
-        }
+            if (!std::cin) { // Handle failure/EOF
+                break;
+            }
+        } while (line.empty());
         bool good = false;
         while (!good){
             parse_can_line(line, timestamp, fframe, good);
@@ -266,9 +269,12 @@ int main(int argc, char* argv[])
         } else if (args.input == STDIN){
             double timestamp;
             std::string line;
-            while (line.size() < 1){
+            do {
                 std::getline(std::cin, line);
-            }
+                if (!std::cin) { // Handle failure/EOF
+                    break;
+                }
+            } while (line.empty());
             bool good = false;
 
             int empteylinecounter = 0;
@@ -392,10 +398,12 @@ int main(int argc, char* argv[])
                 }
                 os << parquet::EndRow;
 
-                int d = 0;
-                while (d < cache_object.size()){
-                    cache_object[d] = std::monostate{};
-                    d++;
+                if(!args.forward_fill){
+                    int d = 0;
+                    while (d < cache_object.size()){
+                        cache_object[d] = std::monostate{};
+                        d++;
+                    }
                 }
             }
 

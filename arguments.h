@@ -23,6 +23,7 @@ struct CommandLineArugments {
     std::string parquet_filename = "test.parquet";
     std::string can_interface = "vcan0";
     double cache_ms = 0.0;
+    bool forward_fill = false;
 };
 
 CommandLineArugments parse_cli_arguments(int argc, char* argv[]){
@@ -63,6 +64,10 @@ CommandLineArugments parse_cli_arguments(int argc, char* argv[]){
             }
             std::cout << "Got caching period=" << argv[arg+1] << "ms\n";
             args_out.cache_ms = std::stod(argv[arg+1]);
+            arg++;
+        } else if(std::strcmp(argv[arg], "-forward-fill") == 0)  {
+            std::cout << "Using forward fill\n";
+            args_out.forward_fill = true;
             arg++;
         } else {
             std::cout << "Incorrect argument " << argv[argc] << ". Example: \n ./decoder file.dbc [-of output.parquet] [-if vcan0] [-socket|-file] [-cache 10] \n \"if\" is used for the interface name in socket mode and the file name in file mode \n";
