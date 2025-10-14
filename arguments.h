@@ -13,7 +13,7 @@
 enum source{
     SOCKETCAN,
     CANDUMP,
-    TCPSTREAM
+    STDIN
 };
 
 struct CommandLineArugments {
@@ -54,6 +54,9 @@ CommandLineArugments parse_cli_arguments(int argc, char* argv[]){
         } else if(std::strcmp(argv[arg], "-file") == 0){
             std::cout << "Using file for input\n";
             args_out.input = CANDUMP;
+        } else if(std::strcmp(argv[arg], "-stdin") == 0){
+            std::cout << "Using stdin for input\n";
+            args_out.input = STDIN;
         } else if(std::strcmp(argv[arg], "-cache") == 0)  {
             if (arg + 1 >= argc) {
                 std::cerr << "Error: Missing caching period in ms; No caching active.\n";

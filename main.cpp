@@ -203,6 +203,16 @@ int main(int argc, char* argv[])
         
         start_time_s = timestamp;
         //std::cout << "Start Time of Can Log (epoch): " << timestamp << "\n"; 
+    } else if (args.input == STDIN){ // This does not currently work with nc
+        double timestamp;
+        std::string line;
+        while (line.size()  < 1){
+            std::getline(std::cin, line);
+        }
+        bool good = false;
+        while (!good){
+            parse_can_line(line, timestamp, fframe, good);
+        }
     }
 
     int num_packets_rx = 0;
@@ -233,10 +243,32 @@ int main(int argc, char* argv[])
                 std::cerr << "Incomplete CAN frame" << std::endl;
                 continue;
             }
-        } else {
+        } else if (args.input == CANDUMP){
             double timestamp;
             std::string line;
             std::getline(infile, line);
+            bool good = false;
+
+            int empteylinecounter = 0;
+            while (!good && empteylinecounter < 11){
+                parse_can_line(line, timestamp, frame, good);
+                empteylinecounter++;
+            }
+
+            if(empteylinecounter > 10){
+                std::cout << "Breaking for EOF\n";
+                break;
+            }
+
+            rcv_time_ms = (timestamp-start_time_s)*1000;
+            //std::cout << std::setprecision(20) << "Message Delta Timestamp: " << rcv_time_ms << "   Message abs Timestamp" << timestamp << "\n";
+
+        } else if (args.input == STDIN){
+            double timestamp;
+            std::string line;
+            while (line.size() < 1){
+                std::getline(std::cin, line);
+            }
             bool good = false;
 
             int empteylinecounter = 0;
