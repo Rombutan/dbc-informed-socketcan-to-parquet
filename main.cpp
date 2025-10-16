@@ -121,14 +121,19 @@ int main(int argc, char* argv[])
             const dbcppp::ISignal& sig_ref = msg_ref.Signals_Get(n);
             dbcppp::ISignal::EExtendedValueType ev_type = sig_ref.ExtendedValueType();
             char type_name[6] = "-----";
-            if(ev_type == dbcppp::ISignal::EExtendedValueType::Float){
-                std::cerr << "Unhandled Extended Value Type " << strerror(errno) << std::endl;
-            } else if (ev_type == dbcppp::ISignal::EExtendedValueType::Double){
-                std::cerr << "Unhandled Extended Value Type " << strerror(errno) << std::endl;
+            SignalTypeOrderTracker signal;
+            
+            if (sig_ref.Name().substr(0, 6) == "flt32_"){
+                signal.signal_name = sig_ref.Name().substr(6);
 
-            // The only useful case: where the set type in DBC is Integer (honestly not sure where this comes from since it's not in the DBC spec..)
-            } else if (ev_type == dbcppp::ISignal::EExtendedValueType::Integer){
-                SignalTypeOrderTracker signal;
+                std::cout << signal.signal_name << " Is an IEEE float encoded \n";
+                
+                std::strncpy(type_name, "float", 5);
+
+                signal.arrow_type = parquet::Type::type::FLOAT;
+            }
+
+            else { // All integer encoded signals
                 signal.signal_name = sig_ref.Name();
                 if (sig_ref.BitSize() == 1){
                     std::strncpy(type_name, "bool ", 5);
@@ -148,12 +153,9 @@ int main(int argc, char* argv[])
                         signal.arrow_type = parquet::Type::type::FLOAT;
                     }
                 }
-                schema_fields.push_back(std::move(signal));
-
-
-            } else {
-                std::cerr << "Unhandled Extended Value Type " << strerror(errno) << std::endl;
             }
+            schema_fields.push_back(std::move(signal));
+
             //std::cout << "\tSignal " << n << ": " << sig_ref.Name() << " type: " << type_name << "\n";
             n++;
         }
@@ -316,14 +318,32 @@ int main(int argc, char* argv[])
                 {
                     //std::cout << "\t" << sig.Name() << "=" << sig.RawToPhys(sig.Decode(frame.data)) << sig.Unit() << "\n";
                     // Find the index of this signal in the schema list
+
+                    std::string CleanName;
+
+                    if (sig.Name().substr(0, 6) == "flt32_"){
+                        CleanName = sig.Name().substr(6);
+                    } else {
+                        CleanName = sig.Name();
+                    }
+
                     auto it = std::find_if(schema_fields.begin(), schema_fields.end(),
-                        [&sig](const SignalTypeOrderTracker& tracker) { return tracker.signal_name == sig.Name(); });
+                        [CleanName](const SignalTypeOrderTracker& tracker) { return tracker.signal_name == CleanName; });
                     
                     if (it != schema_fields.end()){
                         //std::cout << "Found signal " << sig.Name() << " in schema at index " << std::distance(schema_fields.begin(), it) << " With type: " << it->arrow_type << "\n";
                         int index = std::distance(schema_fields.begin(), it);
                         // Set the value in the row_values based on the type
-                        if (it->arrow_type == parquet::Type::type::DOUBLE){
+                        
+                        if(sig.Name().substr(0, 6) == "flt32_"){
+                            std::array<unsigned char, 4> bytes = extract_32_bits(frame.data, sig.StartBit());
+                            uint32_t bits;
+                            
+                            std::memcpy(&bits, bytes.data(), sizeof(bits));
+                            row_values[index] = static_cast<float>(le_uint32_to_float(bits));
+                        }
+                        
+                        else if (it->arrow_type == parquet::Type::type::DOUBLE){
                             row_values[index] = static_cast<double>(sig.RawToPhys(sig.Decode(frame.data)));
                         } else if (it->arrow_type == parquet::Type::type::FLOAT){
                             row_values[index] = static_cast<float>(sig.RawToPhys(sig.Decode(frame.data)));
@@ -338,6 +358,8 @@ int main(int argc, char* argv[])
                         } else {
                             std::cerr << "Unhandled arrow type for signal " << sig.Name() << "\n";
                         }
+                    } else {
+                        std::cerr << "signal not found in dbc: " << CleanName << "\n";
                     }
 
                 }

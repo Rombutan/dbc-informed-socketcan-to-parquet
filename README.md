@@ -51,3 +51,6 @@ You can also record on another device using netcat, or anything else of your cho
 ```
 nc -l 9000 | ./decodere fs.dbc -of test.parquet -cache 50 -stdin
 ```
+
+# Weird Shit
+- in order to handle vdm sending floats as actual floats, 32 bit little endian floats are handled architecture agnostically by prefixing `flt32_` before the signal name. This prefix is removed and not included in the name of the column in parquet schema...
