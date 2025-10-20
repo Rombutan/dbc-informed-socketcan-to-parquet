@@ -24,7 +24,7 @@ canplayer -i -v vcan0=can0 -I candump.log
 
 # Usage
 ```
-./decoder file.dbc [-of output.parquet] [-if vcan0] [-socket|-file|-stdin] [-cache 10] [-forward-fill]
+./decoder file.dbc [-of output.parquet] [-if vcan0] [-socket|-file|-stdin] [-cache 10] [-forward-fill] [-live-decode Time_ms]
 ```
 You must always provide a dbc file and it must be the first argument. The order of the others might matter, idk.
 
@@ -36,6 +36,8 @@ There are three input options:
 If you want to cache some period of messages into a single database row, use the `-cache` argument followed by a float or int with unit ms. The timestamp of each output row will be that of the first message which is cached into that row.
 
 The `-forward-fill` option will not clear the cache after writting a row, so once a value is set by the recieve of a message with it's corresponding signal, it will not be set back to null, and will only reset if another message is recieved with that signal.
+
+If you want to print signal values to the terminal as the program runs, use the `[-live-decode <Signal Name>]` option. You must also pass a signal name, which must be in the DBC. You can enable as many live outputs as you want by passing `-live-decode` seveal times. 
 
 For Example:
 ```

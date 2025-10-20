@@ -32,6 +32,8 @@
 
 #include <chrono>
 
+#include <algorithm>
+
 // In this project
 #include "custom_types.h"
 #include "arguments.h"
@@ -416,9 +418,26 @@ int main(int argc, char* argv[])
                     } else {
                         std::cerr << "smth kerfuckedered\n";
                     }
+
+
                     v++;
                 }
                 os << parquet::EndRow;
+
+
+                // Live deocode
+                int ldi = 0;
+                while(ldi < args.live_decode_signals.size()){
+                    int signal_index = find_index_by_name(schema_fields, args.live_decode_signals[ldi]);
+                    if(signal_index > -1){
+                        std::cout << schema_fields[signal_index].signal_name << "(" << signal_index << ")" << ": ";
+                        std::cout << variant_to_string(cache_object[signal_index]) << "  |  ";
+                    }
+                    ldi++;
+                }
+                if(ldi > 0){
+                    std::cout << "\n";
+                }
 
                 if(!args.forward_fill){
                     int d = 0;
@@ -435,7 +454,9 @@ int main(int argc, char* argv[])
             num_packets_rx++;
 
             if (num_packets_rx % args.num_packets_to_read == 0){
-                std::cout << "Received " << num_packets_rx << " packets\r" << std::flush << "\n";
+                if(args.live_decode_signals.size() < 1){
+                    std::cout << "Received " << num_packets_rx << " packets\r" << std::flush << "\n";
+                }
                 os << parquet::EndRowGroup;
                 //std::cout << outfile->Flush() << "\n";
                 //std::cout << std::flush;

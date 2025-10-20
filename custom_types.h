@@ -25,6 +25,35 @@ struct SignalTypeOrderTracker
 using DataTypeOrVoid = std::variant<std::monostate, double, int32_t, int64_t, __int128_t, float, bool>;
 
 
+// Function to convert the variant content to a printable string
+std::string variant_to_string(const DataTypeOrVoid& data) {
+    // 1. Use std::visit with a lambda visitor.
+    // The lambda is called with the *actual* type held by the variant.
+    return std::visit([](auto&& arg) -> std::string {
+        using T = std::decay_t<decltype(arg)>;
+
+        // 2. Handle the std::monostate (empty/void) case separately.
+        if constexpr (std::is_same_v<T, std::monostate>) {
+            return "Void/Empty";
+        }
+        // 3. Handle the __int128_t case (requires custom string conversion).
+        else if constexpr (std::is_same_v<T, __int128_t>) {
+            // __int128_t doesn't have native ostream support, so we need a helper.
+            // A full implementation is complex, but for printing, we'll simplify.
+            // For a robust solution, you'd convert to a string using a library or custom logic.
+            // For this example, we'll just indicate the type.
+            return "__int128_t (custom print required)"; 
+        }
+        // 4. Handle all other supported types (doubles, ints, floats, bools).
+        else {
+            // Use a stringstream to convert the value to a string.
+            std::ostringstream oss;
+            oss << arg;
+            return oss.str();
+        }
+    }, data);
+}
+
 std::array<unsigned char, 4> extract_32_bits(const unsigned char data[8], int start_bit) {
     // We use std::array<unsigned char, 4> as the return type for safe return-by-value.
     std::array<unsigned char, 4> extracted_data;
@@ -93,6 +122,24 @@ float le_uint32_to_float(uint32_t le_value) {
     float f;
     std::memcpy(&f, native_bytes.data(), sizeof(f));
     return f;
+}
+
+int find_index_by_name(const std::vector<SignalTypeOrderTracker>& vec, const std::string& target_name) {
+    // 1. Use std::find_if to get an iterator to the first matching element.
+    auto it = std::find_if(vec.begin(), vec.end(), 
+        [&target_name](const SignalTypeOrderTracker& d) {
+            return d.signal_name == target_name;
+        }
+    );
+
+    // 2. Check if the element was found.
+    if (it != vec.end()) {
+        // 3. Use std::distance to calculate the index from the start (begin()).
+        return std::distance(vec.begin(), it);
+    } else {
+        // Return a sentinel value (e.g., -1) if the element is not found.
+        return -1;
+    }
 }
 
 #endif

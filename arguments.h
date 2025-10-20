@@ -24,6 +24,7 @@ struct CommandLineArugments {
     std::string can_interface = "vcan0";
     double cache_ms = 0.0;
     bool forward_fill = false;
+    std::vector<std::string> live_decode_signals;
 };
 
 CommandLineArugments parse_cli_arguments(int argc, char* argv[]){
@@ -68,6 +69,13 @@ CommandLineArugments parse_cli_arguments(int argc, char* argv[]){
         } else if(std::strcmp(argv[arg], "-forward-fill") == 0)  {
             std::cout << "Using forward fill\n";
             args_out.forward_fill = true;
+            arg++;
+        } else if(std::strcmp(argv[arg], "-live-decode") == 0)  {
+            if (arg + 1 >= argc) {
+                std::cerr << "Error: Missing Signal to live decode.\n";
+            }
+            std::cout << "Adding " << argv[arg+1] << " to live decode.\n";
+            args_out.live_decode_signals.push_back(argv[arg+1]);
             arg++;
         } else {
             std::cout << "Incorrect argument " << argv[argc] << ". Example: \n ./decoder file.dbc [-of output.parquet] [-if vcan0] [-socket|-file] [-cache 10] \n \"if\" is used for the interface name in socket mode and the file name in file mode \n";
