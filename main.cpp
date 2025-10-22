@@ -175,10 +175,11 @@ int main(int argc, char* argv[])
         influxWriter.table = "live";
     }
     
-    influxWriter.tags.push_back(args.can_interface); // give tag of filename
+    //influxWriter.tags.push_back(args.can_interface); // give tag of filename
     influxWriter.host = args.host;
     influxWriter.token = args.token;
 
+    initInflux();
 
     // Build schema from signal list
     parquet::schema::NodeVector fields;
@@ -303,6 +304,7 @@ int main(int argc, char* argv[])
             }
 
             if(empteylinecounter > 10){
+                postRows();
                 std::cout << "Breaking for EOF\n";
                 break;
             }
@@ -480,6 +482,8 @@ int main(int argc, char* argv[])
                     std::cout << "Received " << num_packets_rx << " packets\r" << std::flush << "\n";
                 }
                 os << parquet::EndRowGroup;
+
+                postRows();
                 //std::cout << outfile->Flush() << "\n";
                 //std::cout << std::flush;
                 if(args.input == SOCKETCAN){

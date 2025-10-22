@@ -1,7 +1,12 @@
 #ifndef INFLUXUPLOAD_H
 #define INFLUXUPLOAD_H
 
-//#define CPPHTTPLIB_OPENSSL_SUPPORT
+#define CPPHTTPLIB_OPENSSL_SUPPORT
+
+#include <iostream>
+#include <future>
+#include <chrono>
+#include <thread>
 
 #include "httplib.h"
 #include "custom_types.h"
@@ -16,13 +21,29 @@ struct InfluxWriterState{
     std::vector<std::string> tags;
 } influxWriter;
 
-httplib::Client cli(influxWriter.host);
-//httplib::SSLClient cli(influxWriter.host);
+
+
+std::unique_ptr<httplib::Client> cli;
+
+void initInflux(){
+    cli = std::make_unique<httplib::Client>(influxWriter.host.c_str());
+    cli->set_keep_alive(true);
+}
+
+std::string lpstring;
+
+void postRows(){
+    auto res = cli->Post(influxWriter.endpoint.c_str(),{{"Authorization", "Bearer " + influxWriter.token}}, lpstring, "text/plain; charset=utf-8");
+    httplib::Error err = res.error();
+    std::cout << res->body << "        " << res->status << "\n";
+    //std::cout << lpstring;
+    lpstring.clear();
+}
 
 void writeRow(std::vector<DataTypeOrVoid> vec){
-    std::string lpstring = influxWriter.table;
-
     int i = 0;
+    lpstring.append(influxWriter.table);
+
     while(i<influxWriter.tags.size()){
         lpstring.append(",");
         lpstring.append(influxWriter.tags[i]);
@@ -47,13 +68,12 @@ void writeRow(std::vector<DataTypeOrVoid> vec){
         lpstring.append(variant_to_string(vec[i]));
         i++;
     }
+    lpstring.append(" ");
+    lpstring.append(std::to_string(std::chrono::duration_cast<std::chrono::nanoseconds>(
+        std::chrono::system_clock::now().time_since_epoch()
+    ).count()));
 
     lpstring.append("\n");
-    httplib::Result res = cli.Post(influxWriter.endpoint,{{"Authorization", "Bearer "+ influxWriter.token}}, lpstring, "/text");
-    httplib::Error err = res.error();
-    
-    std::cout << httplib::to_string(err) << res.ssl_error() << "\n";
 }
-
 
 #endif
