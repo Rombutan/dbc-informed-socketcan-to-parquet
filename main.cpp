@@ -38,6 +38,7 @@
 #include "custom_types.h"
 #include "arguments.h"
 #include "candump_parse.h"
+#include "influxupload.h"
 
 
 // from uapi/linux/can.h
@@ -164,6 +165,20 @@ int main(int argc, char* argv[])
 
         i++;
     }
+
+    // Setup influx upload struct thingimajiger
+    influxWriter.schema_fields = schema_fields;
+
+    if(args.input == source::CANDUMP){
+        influxWriter.table = "dacar";
+    } else {
+        influxWriter.table = "live";
+    }
+    
+    influxWriter.tags.push_back(args.can_interface); // give tag of filename
+    influxWriter.host = args.host;
+    influxWriter.token = args.token;
+
 
     // Build schema from signal list
     parquet::schema::NodeVector fields;
@@ -395,8 +410,9 @@ int main(int argc, char* argv[])
             // Output cached row
             if (rcv_time_ms > cache_start_ms+args.cache_ms){
                 cache_start_ms = rcv_time_ms;
-                v=1;
-                os << cache_start_ms;
+
+                cache_object[0] = cache_start_ms;
+                v=0;
                 while(v < row_values.size()){
                     const auto& value = cache_object[v];
                     //std::cout << "Value type: " << schema_fields[v].arrow_type << " Belonging to signal: " << schema_fields[v].signal_name << "\n";
@@ -423,6 +439,12 @@ int main(int argc, char* argv[])
                     v++;
                 }
                 os << parquet::EndRow;
+
+                // influx upload
+                if(args.host.size() > 2){
+                    writeRow(cache_object);
+                }
+                
 
 
                 // Live deocode

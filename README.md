@@ -41,12 +41,12 @@ If you want to print signal values to the terminal as the program runs, use the 
 
 For Example:
 ```
-./decoder fs.dbc --if can0 --of sep13data_run3.parquet -socket
+./decoder fs.dbc --if can0 --of sep13data_run3.parquet --socket --live-decode Time_ms
 ```
 
 If you wish to convert a candump file directly, use something similar to this example:
 ```
-./decoder fs.dbc --if candump-sep13data_run3.log -of sep13data_run3.parquet -file
+./decoder fs.dbc --if candump-sep13data_run3.log --of sep13data_run3.parquet --file
 ```
 
 You can also record on another device using netcat, or anything else of your chosing (including candump in stdout mode for bettter(?) timestamping) by using the `--stdin` argument
