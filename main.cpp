@@ -310,7 +310,7 @@ int main(int argc, char* argv[])
                 }
                 os << parquet::EndRowGroup;
 
-                //postRows();
+                postRows();
 
                 if(args.input == SOCKETCAN){
                     break;
