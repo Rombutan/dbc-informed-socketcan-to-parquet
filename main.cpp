@@ -39,6 +39,7 @@
 #include "arguments.h"
 #include "candump_parse.h"
 #include "influxupload.h"
+#include "decoder.h"
 
 
 // from uapi/linux/can.h
@@ -52,7 +53,6 @@
 //	uint8_t    data[8];
 //};
 
-using ArrowSchemaList = std::vector<SignalTypeOrderTracker>;
 static std::shared_ptr<arrow::io::FileOutputStream> outfile;
 
 int main(int argc, char* argv[])
@@ -60,23 +60,7 @@ int main(int argc, char* argv[])
     
     CommandLineArugments args = parse_cli_arguments(argc, argv);
 
-    std::unique_ptr<dbcppp::INetwork> net;
-    {
-        std::ifstream idbc(args.dbc_filename.c_str());
-        net = dbcppp::INetwork::LoadDBCFromIs(idbc);
-    }
-
-    if (net.get() == nullptr) {
-        std::cerr << "failed to parse dbc\n";
-        return -1;
-    }
-
-    std::unordered_map<uint64_t, const dbcppp::IMessage *> messages;
-    for (const dbcppp::IMessage& msg : net->Messages())
-    {
-        messages.insert(std::make_pair(msg.Id(), &msg));
-    }
-    
+    Decoder decoder(args.dbc_filename);
 
     
     int s; //need to instantiate here for scope reasons
@@ -108,66 +92,10 @@ int main(int argc, char* argv[])
         }
     } else if (args.input == CANDUMP) {
         infile = std::ifstream(args.can_interface.c_str());
-    }
-
-    // Build list of signals used to match up by index, and also to construct the schema
-    ArrowSchemaList schema_fields;
-
-    schema_fields.push_back(SignalTypeOrderTracker{"Time_ms", parquet::Type::type::DOUBLE}); // First column is always timestamp
-
-    int i = 0;
-    while (i < net->Messages_Size()){
-        const dbcppp::IMessage& msg_ref = net->Messages_Get(i);
-        //std::cout << "Message " << i << ": " << msg_ref.Name() << "\n";
-        int n = 0;
-        while(n<msg_ref.Signals_Size()){
-            const dbcppp::ISignal& sig_ref = msg_ref.Signals_Get(n);
-            dbcppp::ISignal::EExtendedValueType ev_type = sig_ref.ExtendedValueType();
-            char type_name[6] = "-----";
-            SignalTypeOrderTracker signal;
-            
-            if (sig_ref.Name().substr(0, 6) == "flt32_"){
-                signal.signal_name = sig_ref.Name().substr(6);
-
-                std::cout << signal.signal_name << " Is an IEEE float encoded \n";
-                
-                std::strncpy(type_name, "float", 5);
-
-                signal.arrow_type = parquet::Type::type::FLOAT;
-            }
-
-            else { // All integer encoded signals
-                signal.signal_name = sig_ref.Name();
-                if (sig_ref.BitSize() == 1){
-                    std::strncpy(type_name, "bool ", 5);
-                    signal.arrow_type = parquet::Type::type::BOOLEAN;
-                } else if (sig_ref.Factor() < 1.0001 && sig_ref.Factor() > 9.9999){
-                    std::strncpy(type_name, "int  ", 5);
-                    signal.arrow_type = parquet::Type::type::INT32;
-                    if (sig_ref.BitSize() > 30){
-                        signal.arrow_type = parquet::Type::type::INT64;
-                    } else if (sig_ref.BitSize() > 62){
-                        signal.arrow_type = parquet::Type::type::INT96;
-                    }
-                } else {
-                    std::strncpy(type_name, "float", 5);
-                    signal.arrow_type = parquet::Type::type::DOUBLE;
-                    if (sig_ref.BitSize() < 32){
-                        signal.arrow_type = parquet::Type::type::FLOAT;
-                    }
-                }
-            }
-            schema_fields.push_back(std::move(signal));
-
-            //std::cout << "\tSignal " << n << ": " << sig_ref.Name() << " type: " << type_name << "\n";
-            n++;
-        }
-
-        i++;
-    }
+    }    
 
     // Setup influx upload struct thingimajiger
-    influxWriter.schema_fields = schema_fields;
+    influxWriter.schema_fields = decoder.schema_fields;
 
     if(args.input == source::CANDUMP){
         influxWriter.table = "dacar";
@@ -184,7 +112,7 @@ int main(int argc, char* argv[])
     // Build schema from signal list
     parquet::schema::NodeVector fields;
 
-    for (const auto& sig_ptr : schema_fields)
+    for (const auto& sig_ptr : decoder.schema_fields)
     {
         fields.push_back(parquet::schema::PrimitiveNode::Make(
             sig_ptr.signal_name, parquet::Repetition::OPTIONAL, sig_ptr.arrow_type, parquet::ConvertedType::NONE));
@@ -238,10 +166,8 @@ int main(int argc, char* argv[])
         }
     }
 
-    int num_packets_rx = 0;
-
     can_frame frame= {};
-    std::vector<DataTypeOrVoid> cache_object(schema_fields.size(), std::monostate{});
+    std::vector<DataTypeOrVoid> cache_object(decoder.schema_fields.size(), std::monostate{});
     double cache_start_ms = 0;
 
     while (1)
@@ -314,124 +240,30 @@ int main(int argc, char* argv[])
 
         }
 
-        
-        auto iter = messages.find(frame.can_id);
+        if(decoder.decode(frame, &cache_object)){ // Do decode, and if the message matches something from dbc, do allat
 
-        if (iter != messages.end())
-        {
-            // Create a row of empty values to be filled in.. no idea what monostate is but chatgpt said to use it
-            std::vector<DataTypeOrVoid> row_values(schema_fields.size(), std::monostate{});
-            int d = 0;
-            while (d < row_values.size()){
-                row_values[d] = std::monostate{};
-                d++;
-            }
-
-            const dbcppp::IMessage* msg = iter->second;
-            //std::cout << "Received Message: " << msg->Name() << "\n";
-            for (const dbcppp::ISignal& sig : msg->Signals())
-            {
-                const dbcppp::ISignal* mux_sig = msg->MuxSignal();
-                if (sig.MultiplexerIndicator() != dbcppp::ISignal::EMultiplexer::MuxValue ||
-                    (mux_sig && mux_sig->Decode(frame.data) == sig.MultiplexerSwitchValue()))
-                {
-                    //std::cout << "\t" << sig.Name() << "=" << sig.RawToPhys(sig.Decode(frame.data)) << sig.Unit() << "\n";
-                    // Find the index of this signal in the schema list
-
-                    std::string CleanName;
-
-                    if (sig.Name().substr(0, 6) == "flt32_"){
-                        CleanName = sig.Name().substr(6);
-                    } else {
-                        CleanName = sig.Name();
-                    }
-
-                    auto it = std::find_if(schema_fields.begin(), schema_fields.end(),
-                        [CleanName](const SignalTypeOrderTracker& tracker) { return tracker.signal_name == CleanName; });
-                    
-                    if (it != schema_fields.end()){
-                        //std::cout << "Found signal " << sig.Name() << " in schema at index " << std::distance(schema_fields.begin(), it) << " With type: " << it->arrow_type << "\n";
-                        int index = std::distance(schema_fields.begin(), it);
-                        // Set the value in the row_values based on the type
-                        
-                        if(sig.Name().substr(0, 6) == "flt32_"){
-                            std::array<unsigned char, 4> bytes = extract_32_bits(frame.data, sig.StartBit());
-                            uint32_t bits;
-                            
-                            std::memcpy(&bits, bytes.data(), sizeof(bits));
-                            row_values[index] = static_cast<float>(le_uint32_to_float(bits));
-                        }
-                        
-                        else if (it->arrow_type == parquet::Type::type::DOUBLE){
-                            row_values[index] = static_cast<double>(sig.RawToPhys(sig.Decode(frame.data)));
-                        } else if (it->arrow_type == parquet::Type::type::FLOAT){
-                            row_values[index] = static_cast<float>(sig.RawToPhys(sig.Decode(frame.data)));
-                        } else if (it->arrow_type == parquet::Type::type::INT32){
-                            row_values[index] = static_cast<int32_t>(sig.RawToPhys(sig.Decode(frame.data)));
-                        } else if (it->arrow_type == parquet::Type::type::INT64){
-                            row_values[index] = static_cast<int64_t>(sig.RawToPhys(sig.Decode(frame.data)));
-                        } else if (it->arrow_type == parquet::Type::type::INT96){
-                            row_values[index] = static_cast<__int128_t>(sig.RawToPhys(sig.Decode(frame.data)));
-                        } else if (it->arrow_type == parquet::Type::type::BOOLEAN){
-                            row_values[index] = static_cast<bool>(sig.RawToPhys(sig.Decode(frame.data)));
-                        } else {
-                            std::cerr << "Unhandled arrow type for signal " << sig.Name() << "\n";
-                        }
-                    } else {
-                        std::cerr << "signal not found in dbc: " << CleanName << "\n";
-                    }
-
-                }
-
-            }
-            // Put row_values into cache, unless null. 
-            int v = 1;
-
-            while(v < row_values.size()){
-                const auto& value = row_values[v];
-                if (std::holds_alternative<std::monostate>(value)) {
-                } else if (schema_fields[v].arrow_type == parquet::Type::type::DOUBLE) {
-                    cache_object[v] = std::get<double>(value);
-                } else if (schema_fields[v].arrow_type == parquet::Type::type::FLOAT) {
-                    cache_object[v] = std::get<float>(value);
-                } else if (schema_fields[v].arrow_type == parquet::Type::type::INT32) {
-                    cache_object[v] = std::get<int32_t>(value);
-                } else if (schema_fields[v].arrow_type == parquet::Type::type::INT64) {
-                    cache_object[v] = std::get<int32_t>(value);
-                } else if (schema_fields[v].arrow_type == parquet::Type::type::INT96) {
-                    cache_object[v] = std::get<int64_t>(value);
-                    std::cerr << "WARNING.. BIG INTS CURRENTLY UNHANDLED\n";
-                } else if (schema_fields[v].arrow_type == parquet::Type::type::BOOLEAN) {
-                    cache_object[v] = std::get<bool>(value);
-                } else {
-                    std::cerr << "smth kerfuckedered mk2\n";
-                }
-                v++;
-            }
-
-            // Output cached row
             if (rcv_time_ms > cache_start_ms+args.cache_ms){
                 cache_start_ms = rcv_time_ms;
 
                 cache_object[0] = cache_start_ms;
-                v=0;
-                while(v < row_values.size()){
+                int v=0;
+                while(v < cache_object.size()){
                     const auto& value = cache_object[v];
                     //std::cout << "Value type: " << schema_fields[v].arrow_type << " Belonging to signal: " << schema_fields[v].signal_name << "\n";
                     if (std::holds_alternative<std::monostate>(value)) {
                         os.SkipColumns(1);
-                    } else if (schema_fields[v].arrow_type == parquet::Type::type::DOUBLE) {
+                    } else if (decoder.schema_fields[v].arrow_type == parquet::Type::type::DOUBLE) {
                         os << std::get<double>(value);
-                    } else if (schema_fields[v].arrow_type == parquet::Type::type::FLOAT) {
+                    } else if (decoder.schema_fields[v].arrow_type == parquet::Type::type::FLOAT) {
                         os << std::get<float>(value);
-                    } else if (schema_fields[v].arrow_type == parquet::Type::type::INT32) {
+                    } else if (decoder.schema_fields[v].arrow_type == parquet::Type::type::INT32) {
                         os << std::get<int32_t>(value);
-                    } else if (schema_fields[v].arrow_type == parquet::Type::type::INT64) {
+                    } else if (decoder.schema_fields[v].arrow_type == parquet::Type::type::INT64) {
                         os << std::get<int64_t>(value);
-                    } else if (schema_fields[v].arrow_type == parquet::Type::type::INT96) {
+                    } else if (decoder.schema_fields[v].arrow_type == parquet::Type::type::INT96) {
                         std::cerr << "WARNING.. BIG INTS CURRENTLY UNHANDLED\n";
                         os << std::get<int64_t>(value);
-                    } else if (schema_fields[v].arrow_type == parquet::Type::type::BOOLEAN) {
+                    } else if (decoder.schema_fields[v].arrow_type == parquet::Type::type::BOOLEAN) {
                         os << std::get<bool>(value);
                     } else {
                         std::cerr << "smth kerfuckedered\n";
@@ -452,9 +284,9 @@ int main(int argc, char* argv[])
                 // Live deocode
                 int ldi = 0;
                 while(ldi < args.live_decode_signals.size()){
-                    int signal_index = find_index_by_name(schema_fields, args.live_decode_signals[ldi]);
+                    int signal_index = find_index_by_name(decoder.schema_fields, args.live_decode_signals[ldi]);
                     if(signal_index > -1){
-                        std::cout << schema_fields[signal_index].signal_name << "(" << signal_index << ")" << ": ";
+                        std::cout << decoder.schema_fields[signal_index].signal_name << "(" << signal_index << ")" << ": ";
                         std::cout << variant_to_string(cache_object[signal_index]) << "  |  ";
                     }
                     ldi++;
@@ -472,20 +304,14 @@ int main(int argc, char* argv[])
                 }
             }
 
-            //std::cout << "---- ROW END ----\n";
-            //os << parquet::EndRowGroup;
-            //std::cout << "--- WRITE END ---\n";
-            num_packets_rx++;
-
-            if (num_packets_rx % args.num_packets_to_read == 0){
+            if (decoder.msg_count % args.num_packets_to_read == 0){
                 if(args.live_decode_signals.size() < 1){
-                    std::cout << "Received " << num_packets_rx << " packets\r" << std::flush << "\n";
+                    std::cout << "Received " << decoder.msg_count << " packets\r" << std::flush << "\n";
                 }
                 os << parquet::EndRowGroup;
 
-                postRows();
-                //std::cout << outfile->Flush() << "\n";
-                //std::cout << std::flush;
+                //postRows();
+
                 if(args.input == SOCKETCAN){
                     break;
                 }
