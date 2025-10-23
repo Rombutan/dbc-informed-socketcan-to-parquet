@@ -175,7 +175,7 @@ int main(int argc, char* argv[])
         influxWriter.table = "live";
     }
     
-    //influxWriter.tags.push_back(args.can_interface); // give tag of filename
+    influxWriter.tags.push_back("srcfile="+args.can_interface); // give tag of filename
     influxWriter.host = args.host;
     influxWriter.token = args.token;
 
