@@ -119,12 +119,7 @@ int main(int argc, char* argv[])
     // Setup influx upload struct thingimajiger
     influxWriter.schema_fields = decoder.schema_fields;
 
-    if(args.input == source::CANDUMP){
-        influxWriter.table = "dacar";
-    } else {
-        influxWriter.table = "live";
-    }
-    
+    influxWriter.table = args.table;
     influxWriter.tags.push_back("srcfile="+args.can_interface); // give tag of filename
     influxWriter.host = args.host;
     influxWriter.token = args.token;
@@ -294,7 +289,7 @@ int main(int argc, char* argv[])
                         if (v >= 0) {
                             auto cast_result = scalar->CastTo(map_parquet_to_arrow(decoder.schema_fields[v].arrow_type));
                             if (cast_result.ok()) {
-                                if(name == "Time" or name == "timestamp"){ // Support legacy format conversion of time
+                                if(name == "Time" or name == "timestamp" or "Seconds"){ // Support legacy format conversion of time
                                     v = find_index_by_name(decoder.schema_fields, "Time_ms");
                                     cache_object[v] = std::get<double>(scalar_to_variant(cast_result.ValueOrDie())) * 1000;
                                     rcv_time_ms = std::get<double>(scalar_to_variant(cast_result.ValueOrDie())) * 1000;
@@ -321,7 +316,7 @@ int main(int argc, char* argv[])
                             }
                             
                         } else {
-                            std::cerr << "Warning: no matching field for name " << name << "\n";
+                            //std::cerr << "Warning: no matching field for name " << name << "\n";
                         }
                     }
                     

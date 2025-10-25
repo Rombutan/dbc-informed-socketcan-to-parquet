@@ -19,9 +19,10 @@ enum source{
 
 struct CommandLineArugments {
     source input = CANDUMP; 
-    int num_packets_to_read = 1000;
+    int num_packets_to_read = 100;
     std::string dbc_filename = "fs.dbc";
     std::string parquet_filename = "test.parquet";
+    std::string table = "fs23migrated";
     std::string can_interface = "vcan0";
     double cache_ms = 0.0;
     bool forward_fill = false;
