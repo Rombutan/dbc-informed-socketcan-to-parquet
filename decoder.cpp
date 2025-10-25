@@ -44,9 +44,9 @@ Decoder::Decoder(std::string dbc_filename){
                 } else if (sig_ref.Factor() < 1.0001 && sig_ref.Factor() > 9.9999){
                     std::strncpy(type_name, "int  ", 5);
                     signal.arrow_type = parquet::Type::type::INT32;
-                    if (sig_ref.BitSize() > 30){
+                    if (sig_ref.BitSize() > 32){
                         signal.arrow_type = parquet::Type::type::INT64;
-                    } else if (sig_ref.BitSize() > 62){
+                    } else if (sig_ref.BitSize() > 64){
                         signal.arrow_type = parquet::Type::type::INT96;
                     }
                 } else {

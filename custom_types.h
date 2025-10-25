@@ -18,6 +18,8 @@ struct SignalTypeOrderTracker
     
     // Arrow style type of the signal (will either be float, or int... but maybe we'll extend to treat bool as bool and not int in the future)
     parquet::Type::type arrow_type; 
+
+    std::shared_ptr<arrow::DataType> arrow_datatype;
 };
 
 using ArrowSchemaList = std::vector<SignalTypeOrderTracker>;
@@ -33,5 +35,8 @@ float le_uint32_to_float(uint32_t le_value);
 
 int find_index_by_name(const std::vector<SignalTypeOrderTracker>& vec, const std::string& target_name);
 
+DataTypeOrVoid scalar_to_variant(const std::shared_ptr<arrow::Scalar>& scalar);
+
+std::shared_ptr<arrow::DataType> map_parquet_to_arrow(parquet::Type::type t);
 
 #endif

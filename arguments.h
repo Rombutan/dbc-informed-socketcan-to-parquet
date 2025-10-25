@@ -13,7 +13,8 @@
 enum source{
     SOCKETCAN,
     CANDUMP,
-    STDIN
+    STDIN,
+    PARQUET
 };
 
 struct CommandLineArugments {
@@ -63,6 +64,9 @@ CommandLineArugments parse_cli_arguments(int argc, char* argv[]){
         } else if(std::strcmp(argv[arg], "--stdin") == 0){
             std::cout << "Using stdin for input\n";
             args_out.input = STDIN;
+        } else if(std::strcmp(argv[arg], "--parquet") == 0){
+            std::cout << "Using parquet for input\n";
+            args_out.input = PARQUET;
         } else if(std::strcmp(argv[arg], "--cache") == 0)  {
             if (arg + 1 >= argc) {
                 std::cerr << "Error: Missing caching period in ms; No caching active.\n";

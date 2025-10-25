@@ -4,7 +4,9 @@
 #include "parquet/arrow/writer.h"
 #include "parquet/api/writer.h"
 #include "parquet/stream_writer.h"
-
+#include <stdio.h>
+#include <iostream>
+#include <cerrno>
 #include "custom_types.h"
 
 
@@ -122,5 +124,50 @@ int find_index_by_name(const std::vector<SignalTypeOrderTracker>& vec, const std
     } else {
         // Return a sentinel value (e.g., -1) if the element is not found.
         return -1;
+    }
+}
+
+std::shared_ptr<arrow::DataType> map_parquet_to_arrow(parquet::Type::type t) { // Used for parquet reading
+    switch (t) {
+        case parquet::Type::BOOLEAN: return arrow::boolean();
+        case parquet::Type::INT32:   return arrow::int32();
+        case parquet::Type::INT64:   return arrow::int64();
+        case parquet::Type::INT96:   return arrow::timestamp(arrow::TimeUnit::NANO);
+        case parquet::Type::FLOAT:   return arrow::float32();
+        case parquet::Type::DOUBLE:  return arrow::float64();
+        default:                     return nullptr; // unsupported type
+    }
+}
+
+DataTypeOrVoid scalar_to_variant(const std::shared_ptr<arrow::Scalar>& scalar) {
+    if (!scalar->is_valid) {
+        return std::monostate{};
+    }
+
+    switch (scalar->type->id()) {
+        case arrow::Type::BOOL: {
+            auto s = std::dynamic_pointer_cast<arrow::BooleanScalar>(scalar);
+            return s->value;
+        }
+        case arrow::Type::INT32: {
+            auto s = std::dynamic_pointer_cast<arrow::Int32Scalar>(scalar);
+            return s->value;
+        }
+        case arrow::Type::INT64: {
+            auto s = std::dynamic_pointer_cast<arrow::Int64Scalar>(scalar);
+            return s->value;
+        }
+        case arrow::Type::FLOAT: {
+            auto s = std::dynamic_pointer_cast<arrow::FloatScalar>(scalar);
+            return s->value;
+        }
+        case arrow::Type::DOUBLE: {
+            auto s = std::dynamic_pointer_cast<arrow::DoubleScalar>(scalar);
+            return s->value;
+        }
+        default:
+            // If you want, you can handle INT96 (timestamps) or cast to int128_t
+            std::cerr << "Unsupported Arrow type: " << scalar->type->ToString() << "\n";
+            return std::monostate{};
     }
 }

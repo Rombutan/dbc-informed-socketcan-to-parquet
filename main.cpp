@@ -30,6 +30,9 @@
 #include "parquet/stream_writer.h"
 #include "arrow/io/file.h"
 
+#include <parquet/arrow/reader.h>
+#include <memory>
+
 #include <chrono>
 
 #include <algorithm>
@@ -54,6 +57,9 @@
 //};
 
 static std::shared_ptr<arrow::io::FileOutputStream> outfile;
+
+std::shared_ptr<arrow::Table> table; // For parquet input
+
 
 int main(int argc, char* argv[])
 {
@@ -92,7 +98,23 @@ int main(int argc, char* argv[])
         }
     } else if (args.input == CANDUMP) {
         infile = std::ifstream(args.can_interface.c_str());
-    }    
+    } else if (args.input == PARQUET) {
+        std::shared_ptr<arrow::io::ReadableFile> infile;
+        PARQUET_ASSIGN_OR_THROW(infile, arrow::io::ReadableFile::Open(args.can_interface));
+
+        // Create Parquet file reader
+        std::unique_ptr<parquet::arrow::FileReader> parquet_reader;
+        PARQUET_THROW_NOT_OK(
+            parquet::arrow::OpenFile(infile, arrow::default_memory_pool(), &parquet_reader)
+        );
+
+        // Read entire file into an Arrow Table
+        PARQUET_THROW_NOT_OK(parquet_reader->ReadTable(&table));
+
+        std::cout << "Read table with " << table->num_rows()
+                << " rows and " << table->num_columns() << " columns.\n";
+
+    }
 
     // Setup influx upload struct thingimajiger
     influxWriter.schema_fields = decoder.schema_fields;
@@ -238,9 +260,90 @@ int main(int argc, char* argv[])
             rcv_time_ms = (timestamp-start_time_s)*1000;
             //std::cout << std::setprecision(20) << "Message Delta Timestamp: " << rcv_time_ms << "   Message abs Timestamp" << timestamp << "\n";
 
+        } else if (args.input == PARQUET){
+            if(decoder.msg_count > table->num_rows()-1){
+                break;
+                // EOF of parquet
+            }
+
+            bool foundTime = false;
+            for (int i = 0; i < table->num_columns(); ++i) {
+                auto col = table->column(i);
+                auto field = table->schema()->field(i);
+                std::string name = field->name();
+
+                // Get chunked array for this column
+                auto chunked_array = col->chunk(0);
+                if (decoder.msg_count < chunked_array->length()) {
+                    auto scalar_result = chunked_array->GetScalar(decoder.msg_count);
+                    if (scalar_result.ok()) {
+                        auto scalar = scalar_result.ValueOrDie();
+
+                        // Skip nulls — don't store in cache_object
+                        if (!scalar->is_valid) {
+                            continue;
+                            std::cout << "_";
+                        }
+
+                        std::shared_ptr<arrow::DataType> arrow_type;
+
+                        std::string name = field->name();
+
+                        int v = find_index_by_name(decoder.schema_fields, name);
+
+                        if (v >= 0) {
+                            auto cast_result = scalar->CastTo(map_parquet_to_arrow(decoder.schema_fields[v].arrow_type));
+                            if (cast_result.ok()) {
+                                if(name == "Time" or name == "timestamp"){ // Support legacy format conversion of time
+                                    v = find_index_by_name(decoder.schema_fields, "Time_ms");
+                                    cache_object[v] = std::get<double>(scalar_to_variant(cast_result.ValueOrDie())) * 1000;
+                                    rcv_time_ms = std::get<double>(scalar_to_variant(cast_result.ValueOrDie())) * 1000;
+                                    foundTime = true;
+                                    continue;
+                                } else if (name == "Time_ms"){
+                                    foundTime = true;
+                                    rcv_time_ms = std::get<double>(scalar_to_variant(cast_result.ValueOrDie()));
+                                }
+
+                                cache_object[v] = scalar_to_variant(cast_result.ValueOrDie());
+
+                                // EI SWEAR TO GOD IT DOES NOT WORK WITHOUT THIS. DON'T FUCKING TOUCH IT'S NOT THAT SERIOUS
+                                bool bruh = *std::get_if<bool>(&cache_object[v]);
+                                double bruhh = *std::get_if<double>(&cache_object[v]);
+                                int bruhhh = *std::get_if<int32_t>(&cache_object[v]);
+                                int bruhhhh = *std::get_if<int64_t>(&cache_object[v]);
+                                float bruhhhhhh = *std::get_if<float>(&cache_object[v]);
+
+                            } else {
+                                std::cerr << "Failed to cast field " << name
+                                        << " to " << map_parquet_to_arrow(decoder.schema_fields[v].arrow_type)->ToString()
+                                        << ": " << cast_result.status().ToString() << "\n";
+                            }
+                            
+                        } else {
+                            std::cerr << "Warning: no matching field for name " << name << "\n";
+                        }
+                    }
+                    
+                }
+            }
+            if(!foundTime){
+                cache_object[find_index_by_name(decoder.schema_fields, "Time_ms")] = static_cast<double>(decoder.msg_count * 11.91);
+                rcv_time_ms = static_cast<double>(decoder.msg_count * 11.91);
+            }
         }
 
-        if(decoder.decode(frame, &cache_object)){ // Do decode, and if the message matches something from dbc, do allat
+
+        // ----------------------------- DECODE HERE ----------------------
+        bool validrow = false;
+        if(args.input == source::PARQUET){
+            validrow = true;
+            decoder.msg_count++;
+        } else if(decoder.decode(frame, &cache_object)){
+            validrow = true;
+        }
+
+        if(validrow){ // Do decode, and if the message matches something from dbc, do allat
 
             if (rcv_time_ms > cache_start_ms+args.cache_ms){
                 cache_start_ms = rcv_time_ms;
@@ -286,13 +389,13 @@ int main(int argc, char* argv[])
                 while(ldi < args.live_decode_signals.size()){
                     int signal_index = find_index_by_name(decoder.schema_fields, args.live_decode_signals[ldi]);
                     if(signal_index > -1){
-                        std::cout << decoder.schema_fields[signal_index].signal_name << "(" << signal_index << ")" << ": ";
-                        std::cout << variant_to_string(cache_object[signal_index]) << "  |  ";
+                        std::cout << decoder.schema_fields[signal_index].signal_name << ", ";
+                        std::cout << variant_to_string(cache_object[signal_index]) << ", ";
                     }
                     ldi++;
                 }
                 if(ldi > 0){
-                    std::cout << "\n";
+                    std::cout << decoder.msg_count << "\n";
                 }
 
                 if(!args.forward_fill){
