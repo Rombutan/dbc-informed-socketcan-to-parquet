@@ -24,7 +24,7 @@ canplayer -i -v vcan0=can0 -I candump.log
 
 # Usage
 ```
-./decoder file.dbc [--of output.parquet] [--if vcan0] [--socket|--file|--stdin] [--cache 10] [--forward-fill] [--live-decode Time_ms]
+./decoder file.dbc [--of output.parquet] [--if vcan0] [--socket|--file|--stdin] [--cache 10] [--forward-fill] [--live-decode Time_ms] [--token jglkaglkj --host https://blechity blech blech:8181] 
 ```
 You must always provide a dbc file and it must be the first argument. The order of the others might matter, idk.
 
