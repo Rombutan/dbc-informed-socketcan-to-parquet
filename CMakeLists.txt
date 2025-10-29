@@ -34,6 +34,7 @@ find_package(Arrow REQUIRED)
 find_package(Parquet REQUIRED)
 
 add_executable(decoder main.cpp decoder.cpp custom_types.cpp)
+target_compile_options(decoder PUBLIC -g)
 
 target_link_libraries(decoder PRIVATE dbcppp arrow_shared parquet_shared httplib::httplib)
 

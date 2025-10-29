@@ -124,7 +124,10 @@ int main(int argc, char* argv[])
     influxWriter.host = args.host;
     influxWriter.token = args.token;
 
-    initInflux();
+    if(args.token.size() > 2){
+        std::cout << "Starting Influx Uploader \n";
+        initInflux();
+    }
 
     // Build schema from signal list
     parquet::schema::NodeVector fields;
@@ -289,7 +292,7 @@ int main(int argc, char* argv[])
                         if (v >= 0) {
                             auto cast_result = scalar->CastTo(map_parquet_to_arrow(decoder.schema_fields[v].arrow_type));
                             if (cast_result.ok()) {
-                                if(name == "Time" or name == "timestamp" or "Seconds"){ // Support legacy format conversion of time
+                                if(name == "Time" || name == "timestamp" || name == "Seconds"){ // Support legacy format conversion of time
                                     v = find_index_by_name(decoder.schema_fields, "Time_ms");
                                     cache_object[v] = std::get<double>(scalar_to_variant(cast_result.ValueOrDie())) * 1000;
                                     rcv_time_ms = std::get<double>(scalar_to_variant(cast_result.ValueOrDie())) * 1000;
@@ -303,11 +306,11 @@ int main(int argc, char* argv[])
                                 cache_object[v] = scalar_to_variant(cast_result.ValueOrDie());
 
                                 // EI SWEAR TO GOD IT DOES NOT WORK WITHOUT THIS. DON'T FUCKING TOUCH IT'S NOT THAT SERIOUS
-                                bool bruh = *std::get_if<bool>(&cache_object[v]);
-                                double bruhh = *std::get_if<double>(&cache_object[v]);
-                                int bruhhh = *std::get_if<int32_t>(&cache_object[v]);
-                                int bruhhhh = *std::get_if<int64_t>(&cache_object[v]);
-                                float bruhhhhhh = *std::get_if<float>(&cache_object[v]);
+                                // bool bruh = *std::get_if<bool>(&cache_object[v]);
+                                // double bruhh = *std::get_if<double>(&cache_object[v]);
+                                // int bruhhh = *std::get_if<int32_t>(&cache_object[v]);
+                                // int bruhhhh = *std::get_if<int64_t>(&cache_object[v]);
+                                // float bruhhhhhh = *std::get_if<float>(&cache_object[v]);
 
                             } else {
                                 std::cerr << "Failed to cast field " << name
@@ -414,7 +417,7 @@ int main(int argc, char* argv[])
                 
 
                 if(args.input == SOCKETCAN){
-                    break;
+                    //break;
                 }
             }
         }

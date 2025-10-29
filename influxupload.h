@@ -25,12 +25,17 @@ struct InfluxWriterState{
 
 std::unique_ptr<httplib::Client> cli;
 
+std::string lpstring;
+
 void initInflux(){
     cli = std::make_unique<httplib::Client>(influxWriter.host.c_str());
     cli->set_keep_alive(true);
+
+    auto res = cli->Post(influxWriter.endpoint.c_str(),{{"Authorization", "Bearer " + influxWriter.token}}, lpstring, "text/plain; charset=utf-8");
+    httplib::Error err = res.error();
+    std::cout << res->body << "        " << res->status << "\n";
 }
 
-std::string lpstring;
 
 void postRows(){
     auto res = cli->Post(influxWriter.endpoint.c_str(),{{"Authorization", "Bearer " + influxWriter.token}}, lpstring, "text/plain; charset=utf-8");
