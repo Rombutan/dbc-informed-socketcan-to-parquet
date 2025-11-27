@@ -12,8 +12,7 @@ Decoder::Decoder(std::string dbc_filename){
     {
         messages.insert(std::make_pair(msg.Id(), &msg));
     }
-
-    schema_fields.push_back(SignalTypeOrderTracker{"Time_ms", parquet::Type::type::DOUBLE}); // First column is always timestamp
+    schema_fields.push_back(SignalTypeOrderTracker{"Time_ms", parquet::Type::type::DOUBLE, arrow::float64()}); // First column is always timestamp
 
     int i = 0;
     while (i < net->Messages_Size()){
@@ -33,27 +32,34 @@ Decoder::Decoder(std::string dbc_filename){
                 
                 std::strncpy(type_name, "float", 5);
 
-                signal.arrow_type = parquet::Type::type::FLOAT;
+                signal.parquet_type = parquet::Type::type::FLOAT;
+                signal.arrow_datatype = arrow::float32();
             }
 
             else { // All integer encoded signals
                 signal.signal_name = sig_ref.Name();
                 if (sig_ref.BitSize() == 1){
                     std::strncpy(type_name, "bool ", 5);
-                    signal.arrow_type = parquet::Type::type::BOOLEAN;
+                    signal.parquet_type = parquet::Type::type::BOOLEAN;
+                    signal.arrow_datatype = arrow::boolean();
                 } else if (sig_ref.Factor() < 1.0001 && sig_ref.Factor() > 9.9999){
                     std::strncpy(type_name, "int  ", 5);
-                    signal.arrow_type = parquet::Type::type::INT32;
+                    signal.parquet_type = parquet::Type::type::INT32;
+                    signal.arrow_datatype = arrow::int32();
                     if (sig_ref.BitSize() > 32){
-                        signal.arrow_type = parquet::Type::type::INT64;
+                        signal.parquet_type = parquet::Type::type::INT64;
+                        signal.arrow_datatype = arrow::int64();
                     } else if (sig_ref.BitSize() > 64){
-                        signal.arrow_type = parquet::Type::type::INT96;
+                        signal.parquet_type = parquet::Type::type::INT96;
+                        signal.arrow_datatype = arrow::int64();
                     }
                 } else {
                     std::strncpy(type_name, "float", 5);
-                    signal.arrow_type = parquet::Type::type::DOUBLE;
+                    signal.parquet_type = parquet::Type::type::DOUBLE;
+                    signal.arrow_datatype = arrow::float64();
                     if (sig_ref.BitSize() < 32){
-                        signal.arrow_type = parquet::Type::type::FLOAT;
+                        signal.parquet_type = parquet::Type::type::FLOAT;
+                        signal.arrow_datatype = arrow::float32();
                     }
                 }
             }
@@ -95,7 +101,7 @@ bool Decoder::decode(can_frame frame, std::vector<DataTypeOrVoid>* row_values){
                         [CleanName](const SignalTypeOrderTracker& tracker) { return tracker.signal_name == CleanName; });
                     
                     if (it != schema_fields.end()){
-                        //std::cout << "Found signal " << sig.Name() << " in schema at index " << std::distance(schema_fields.begin(), it) << " With type: " << it->arrow_type << "\n";
+                        //std::cout << "Found signal " << sig.Name() << " in schema at index " << std::distance(schema_fields.begin(), it) << " With type: " << it->parquet_type << "\n";
                         int index = std::distance(schema_fields.begin(), it);
                         // Set the value in the row_values based on the type
                         
@@ -107,20 +113,20 @@ bool Decoder::decode(can_frame frame, std::vector<DataTypeOrVoid>* row_values){
                             row_values->at(index) = static_cast<float>(le_uint32_to_float(bits));
                         }
                         
-                        else if (it->arrow_type == parquet::Type::type::DOUBLE){
+                        else if (it->parquet_type == parquet::Type::type::DOUBLE){
                             row_values->at(index) = static_cast<double>(sig.RawToPhys(sig.Decode(frame.data)));
-                        } else if (it->arrow_type == parquet::Type::type::FLOAT){
+                        } else if (it->parquet_type == parquet::Type::type::FLOAT){
                             row_values->at(index) = static_cast<float>(sig.RawToPhys(sig.Decode(frame.data)));
-                        } else if (it->arrow_type == parquet::Type::type::INT32){
+                        } else if (it->parquet_type == parquet::Type::type::INT32){
                             row_values->at(index) = static_cast<int32_t>(sig.RawToPhys(sig.Decode(frame.data)));
-                        } else if (it->arrow_type == parquet::Type::type::INT64){
+                        } else if (it->parquet_type == parquet::Type::type::INT64){
                             row_values->at(index) = static_cast<int64_t>(sig.RawToPhys(sig.Decode(frame.data)));
-                        } else if (it->arrow_type == parquet::Type::type::INT96){
+                        } else if (it->parquet_type == parquet::Type::type::INT96){
                             row_values->at(index) = static_cast<__int128_t>(sig.RawToPhys(sig.Decode(frame.data)));
-                        } else if (it->arrow_type == parquet::Type::type::BOOLEAN){
+                        } else if (it->parquet_type == parquet::Type::type::BOOLEAN){
                             row_values->at(index) = static_cast<bool>(sig.RawToPhys(sig.Decode(frame.data)));
                         } else {
-                            std::cerr << "Unhandled arrow type for signal " << sig.Name() << "\n";
+                            std::cerr << "Unhandled parquet type for signal " << sig.Name() << "\n";
                         }
                     } else {
                         std::cerr << "signal not found in schema_fields: " << CleanName << "\n";

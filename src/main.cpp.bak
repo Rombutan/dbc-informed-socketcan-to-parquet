@@ -135,7 +135,7 @@ int main(int argc, char* argv[])
     for (const auto& sig_ptr : decoder.schema_fields)
     {
         fields.push_back(parquet::schema::PrimitiveNode::Make(
-            sig_ptr.signal_name, parquet::Repetition::OPTIONAL, sig_ptr.arrow_type, parquet::ConvertedType::NONE));
+            sig_ptr.signal_name, parquet::Repetition::OPTIONAL, sig_ptr.parquet_type, parquet::ConvertedType::NONE));
     }
 
     auto node = std::static_pointer_cast<parquet::schema::GroupNode>(
@@ -283,14 +283,14 @@ int main(int argc, char* argv[])
                             std::cout << "_";
                         }
 
-                        std::shared_ptr<arrow::DataType> arrow_type;
+                        std::shared_ptr<arrow::DataType> parquet_type;
 
                         std::string name = field->name();
 
                         int v = find_index_by_name(decoder.schema_fields, name);
 
                         if (v >= 0) {
-                            auto cast_result = scalar->CastTo(map_parquet_to_arrow(decoder.schema_fields[v].arrow_type));
+                            auto cast_result = scalar->CastTo(map_parquet_to_arrow(decoder.schema_fields[v].parquet_type));
                             if (cast_result.ok()) {
                                 if(name == "Time" || name == "timestamp" || name == "Seconds"){ // Support legacy format conversion of time
                                     v = find_index_by_name(decoder.schema_fields, "Time_ms");
@@ -314,7 +314,7 @@ int main(int argc, char* argv[])
 
                             } else {
                                 std::cerr << "Failed to cast field " << name
-                                        << " to " << map_parquet_to_arrow(decoder.schema_fields[v].arrow_type)->ToString()
+                                        << " to " << map_parquet_to_arrow(decoder.schema_fields[v].parquet_type)->ToString()
                                         << ": " << cast_result.status().ToString() << "\n";
                             }
                             
@@ -350,21 +350,21 @@ int main(int argc, char* argv[])
                 int v=0;
                 while(v < cache_object.size()){
                     const auto& value = cache_object[v];
-                    //std::cout << "Value type: " << schema_fields[v].arrow_type << " Belonging to signal: " << schema_fields[v].signal_name << "\n";
+                    //std::cout << "Value type: " << schema_fields[v].parquet_type << " Belonging to signal: " << schema_fields[v].signal_name << "\n";
                     if (std::holds_alternative<std::monostate>(value)) {
                         os.SkipColumns(1);
-                    } else if (decoder.schema_fields[v].arrow_type == parquet::Type::type::DOUBLE) {
+                    } else if (decoder.schema_fields[v].parquet_type == parquet::Type::type::DOUBLE) {
                         os << std::get<double>(value);
-                    } else if (decoder.schema_fields[v].arrow_type == parquet::Type::type::FLOAT) {
+                    } else if (decoder.schema_fields[v].parquet_type == parquet::Type::type::FLOAT) {
                         os << std::get<float>(value);
-                    } else if (decoder.schema_fields[v].arrow_type == parquet::Type::type::INT32) {
+                    } else if (decoder.schema_fields[v].parquet_type == parquet::Type::type::INT32) {
                         os << std::get<int32_t>(value);
-                    } else if (decoder.schema_fields[v].arrow_type == parquet::Type::type::INT64) {
+                    } else if (decoder.schema_fields[v].parquet_type == parquet::Type::type::INT64) {
                         os << std::get<int64_t>(value);
-                    } else if (decoder.schema_fields[v].arrow_type == parquet::Type::type::INT96) {
+                    } else if (decoder.schema_fields[v].parquet_type == parquet::Type::type::INT96) {
                         std::cerr << "WARNING.. BIG INTS CURRENTLY UNHANDLED\n";
                         os << std::get<int64_t>(value);
-                    } else if (decoder.schema_fields[v].arrow_type == parquet::Type::type::BOOLEAN) {
+                    } else if (decoder.schema_fields[v].parquet_type == parquet::Type::type::BOOLEAN) {
                         os << std::get<bool>(value);
                     } else {
                         std::cerr << "smth kerfuckedered\n";

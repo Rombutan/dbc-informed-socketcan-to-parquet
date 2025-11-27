@@ -1,6 +1,8 @@
 #ifndef CANDUMP_PARSE_H
 #define CANDUMP_PARSE_H
 
+#pragma once
+
 #include <fstream>
 #include <unordered_map>
 
@@ -33,7 +35,7 @@ static inline void trim(std::string &s) {
     s.erase(0, i);
 }
 
-void parse_can_line(const std::string line, double& timestamp, can_frame& frame, bool& good) { 
+inline void parse_can_line(const std::string line, double& timestamp, can_frame& frame, bool& good) { 
     std::string clean = line;
     // trim trailing CR/LF
     while (!clean.empty() && (clean.back() == '\r' || clean.back() == '\n'))
@@ -41,7 +43,7 @@ void parse_can_line(const std::string line, double& timestamp, can_frame& frame,
 
     if (clean.empty()){
         good=false;
-        std::cout << "emptey line in candump... trying next\n";
+        std::cout << "emptey line in candump...\n";
         return;
     }
 
@@ -99,7 +101,7 @@ void parse_can_line(const std::string line, double& timestamp, can_frame& frame,
 }
 
 // needed to get timestamp of beginning of file
-void peek_line(std::istream& is, std::string& line) {
+inline void peek_line(std::istream& is, std::string& line) {
     // 1. Get the current position of the input stream pointer
     // This marks the beginning of the line you're about to read.
     std::streampos current_pos = is.tellg();

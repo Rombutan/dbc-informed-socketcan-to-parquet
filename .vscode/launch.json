@@ -10,7 +10,7 @@
             "request": "launch",
             "program": "${workspaceFolder}/build/decoder",
             //"args": ["fs.dbc", "--if", "fs3norcal.log", "--file", "--cache", "50", "--of", "/dev/null"],
-            "args":["fs.dbc", "--if", "fs-data/FS-3/08102025/08102025Endurance1_SecondHalf.parquet", "--of", "/dev/null", "--cache", "10", "--parquet", "--live-decode", "ACC_STATUS_GLV_VOLTAGE"],
+            "args":["fs.dbc", "--if", "fs-data/FS-3/11222025/11222025_1.log", "--of", "~/Downloads/test.parquet", "--cache", "10", "--file", "--live-decode", "ACC_STATUS_GLV_VOLTAGE"],
 
             "stopAtEntry": false,
             "cwd": "${workspaceFolder}/../",

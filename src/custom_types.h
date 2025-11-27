@@ -16,9 +16,10 @@ struct SignalTypeOrderTracker
     // The name of the CAN signal (e.g., "Engine_Speed")
     std::string signal_name; 
     
-    // Arrow style type of the signal (will either be float, or int... but maybe we'll extend to treat bool as bool and not int in the future)
-    parquet::Type::type arrow_type; 
+    // Parquet style type of the signal
+    parquet::Type::type parquet_type; 
 
+    // Arrow type
     std::shared_ptr<arrow::DataType> arrow_datatype;
 };
 

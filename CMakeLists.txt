@@ -33,7 +33,15 @@ FetchContent_MakeAvailable(httplib)
 find_package(Arrow REQUIRED)
 find_package(Parquet REQUIRED)
 
-add_executable(decoder main.cpp decoder.cpp custom_types.cpp)
+add_executable(decoder 
+        src/main.cpp 
+        src/decoder.cpp 
+        src/custom_types.cpp 
+        src/inputs/genericInput.cpp
+        src/inputs/fileInput.cpp
+        src/inputs/parquetInput.cpp
+        src/inputs/socketInput.cpp
+        src/inputs/stdinInput.cpp)
 target_compile_options(decoder PUBLIC -g)
 
 target_link_libraries(decoder PRIVATE dbcppp arrow_shared parquet_shared httplib::httplib)
