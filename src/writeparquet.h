@@ -1,3 +1,5 @@
+/// THIS SHIT IS VIBE CODE 10000 I HATE WRITTING BOILERPLATE
+
 #pragma once
 
 #include <arrow/api.h>

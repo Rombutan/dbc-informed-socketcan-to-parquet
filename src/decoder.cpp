@@ -89,13 +89,8 @@ bool Decoder::decode(can_frame frame, std::vector<DataTypeOrVoid>* row_values){
                     //std::cout << "\t" << sig.Name() << "=" << sig.RawToPhys(sig.Decode(frame.data)) << sig.Unit() << "\n";
                     // Find the index of this signal in the schema list
 
-                    std::string CleanName;
+                    std::string CleanName = sig.Name();
 
-                    if (sig.Name().substr(0, 6) == "flt32_"){
-                        CleanName = sig.Name().substr(6);
-                    } else {
-                        CleanName = sig.Name();
-                    }
 
                     auto it = std::find_if(schema_fields.begin(), schema_fields.end(),
                         [CleanName](const SignalTypeOrderTracker& tracker) { return tracker.signal_name == CleanName; });

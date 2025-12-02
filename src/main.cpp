@@ -104,6 +104,20 @@ int main(int argc, char* argv[])
             curRow[find_index_by_name(decoder.schema_fields, "Time_ms")] = rowStartMs;
             rowStartMs = rowRecentMs;
             rowsIP.push_back(curRow); // Add current row to in-process table
+
+            // Live deocode
+            int ldi = 0;
+            while(ldi < args.live_decode_signals.size()){
+                int signal_index = find_index_by_name(decoder.schema_fields, args.live_decode_signals[ldi]);
+                if(signal_index > -1){
+                    std::cout << decoder.schema_fields[signal_index].signal_name << ", ";
+                    std::cout << variant_to_string(curRow[signal_index]) << ", ";
+                }
+                ldi++;
+            }
+            if(ldi > 0){
+                std::cout << decoder.msg_count << "\n";
+            }
             
             if(!args.forward_fill){ // If forward fill is disabled, reset curRow to monostates/nulls
                 int d = 0;
