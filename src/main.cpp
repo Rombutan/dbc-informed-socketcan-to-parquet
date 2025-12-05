@@ -76,6 +76,7 @@ int main(int argc, char* argv[])
         signal(SIGINT, [](int){shouldExit.store(true);});
     } else if (args.input == CANDUMP) {
         input = std::make_unique<FileInput>(args.can_interface);
+        signal(SIGINT, [](int){shouldExit.store(true);});
     } else if (args.input == STDIN) {
         input = std::make_unique<StdinInput>(args.can_interface);
         signal(SIGINT, [](int){shouldExit.store(true);});
@@ -161,6 +162,7 @@ int main(int argc, char* argv[])
     writer->Close();
     outfile->Close();
 
-    std::cout << "Wrote output.parquet\n";
+    std::cout << "Wrote " << args.parquet_filename << std::endl;
     return 0;
 }
+
