@@ -20,11 +20,13 @@
 
 #include "custom_types.h"
 
+#include "writeparquet.h"
+
 class Decoder{
 public:
     Decoder(std::string dbc_filename);
 
-    bool decode(can_frame frame, std::vector<DataTypeOrVoid>* row_values);
+    bool decode(can_frame frame, std::vector<std::shared_ptr<arrow::ArrayBuilder>>& builders, int row, std::vector<DataTypeOrVoid>& lastValues);
 
     uint32_t msg_count = 0;
 

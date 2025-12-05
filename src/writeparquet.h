@@ -10,129 +10,200 @@
 #include <vector>
 #include <variant>
 #include <string>
+#include "custom_types.h"
 
-// Type alias for your nested variant
-using CellVariant = std::variant<
-    std::monostate,
-    double,
-    int32_t,
-    int64_t,
-    __int128_t,
-    float,
-    bool
->;
+using ValueVariant = DataTypeOrVoid;
 
-using Row = std::vector<CellVariant>;
-using TableData = std::vector<Row>;
+// Make vector of array builders... the array builders are in effect the in process table until it has all elements
+inline std::vector<std::shared_ptr<arrow::ArrayBuilder>>
+CreateBuildersFromSchema(const std::shared_ptr<arrow::Schema>& schema,
+                         arrow::MemoryPool* pool = arrow::default_memory_pool()) {
+    std::vector<std::shared_ptr<arrow::ArrayBuilder>> builders;
+    builders.reserve(schema->num_fields());
 
-// Convert your nested variant into per-column Arrow arrays
-std::shared_ptr<arrow::Array>
-BuildColumnArray(const std::vector<CellVariant>& column_data,
-                 const std::shared_ptr<arrow::Field>& field)
+    for (const auto& field : schema->fields()) {
+        std::shared_ptr<arrow::ArrayBuilder> builder;
+        auto type = field->type();
+
+        if (type->id() == arrow::Type::DOUBLE) {
+            builder = std::make_shared<arrow::DoubleBuilder>(pool);
+        } else if (type->id() == arrow::Type::INT32) {
+            builder = std::make_shared<arrow::Int32Builder>(pool);
+        } else if (type->id() == arrow::Type::INT64) {
+            builder = std::make_shared<arrow::Int64Builder>(pool);
+        } else if (type->id() == arrow::Type::FLOAT) {
+            builder = std::make_shared<arrow::FloatBuilder>(pool);
+        } else if (type->id() == arrow::Type::BOOL) {
+            builder = std::make_shared<arrow::BooleanBuilder>(pool);
+        } else if (type->id() == arrow::Type::DECIMAL128) {
+            builder = std::make_shared<arrow::Decimal128Builder>(type, pool);
+        } else {
+            throw std::runtime_error("Unsupported Arrow type in schema");
+        }
+
+        builders.push_back(builder);
+    }
+
+    return builders;
+}
+
+
+inline arrow::Status SetValueAt(
+    std::vector<std::shared_ptr<arrow::ArrayBuilder>>& builders,
+    int field_index,
+    const ValueVariant& value,
+    int64_t row_index,
+    std::vector<ValueVariant>& lastValues)
 {
-    using namespace arrow;
-    switch (field->type()->id()) {
-        case Type::DOUBLE: {
-            DoubleBuilder builder;
-            for (auto& v : column_data) {
-                if (auto p = std::get_if<double>(&v)) builder.Append(*p);
-                else builder.AppendNull();
-            }
-            std::shared_ptr<Array> out;
-            builder.Finish(&out);
-            return out;
-        }
+    if (field_index < 0 || field_index >= builders.size()) {
+        return arrow::Status::Invalid("Invalid field index");
+    }
 
-        case Type::FLOAT: {
-            FloatBuilder builder;
-            for (auto& v : column_data) {
-                if (auto p = std::get_if<float>(&v)) builder.Append(*p);
-                else builder.AppendNull();
-            }
-            std::shared_ptr<Array> out;
-            builder.Finish(&out);
-            return out;
-        }
+    auto builder = builders[field_index];
 
-        case Type::INT32: {
-            Int32Builder builder;
-            for (auto& v : column_data) {
-                if (auto p = std::get_if<int32_t>(&v)) builder.Append(*p);
-                else builder.AppendNull();
-            }
-            std::shared_ptr<Array> out;
-            builder.Finish(&out);
-            return out;
-        }
+    // Pad nulls if needed
+    int64_t current_len = builder->length();
+    if (row_index > current_len) {
+        ARROW_RETURN_NOT_OK(builder->AppendNulls(row_index - current_len));
+    }
 
-        case Type::INT64: {
-            Int64Builder builder;
-            for (auto& v : column_data) {
-                if (auto p = std::get_if<int64_t>(&v)) builder.Append(*p);
-                // handle __int128_t by casting
-                else if (auto p2 = std::get_if<__int128_t>(&v)) builder.Append((int64_t)*p2);
-                else builder.AppendNull();
-            }
-            std::shared_ptr<Array> out;
-            builder.Finish(&out);
-            return out;
-        }
+    // Now row_index == builder->length() OR row_index < length (overwrite not supported)
+    if (row_index < builder->length()) {
+        return arrow::Status::Invalid(
+            "Attempting to set a value at an already appended index (append-only builder)"
+        );
+    }
 
-        case Type::BOOL: {
-            BooleanBuilder builder;
-            for (auto& v : column_data) {
-                if (auto p = std::get_if<bool>(&v)) builder.Append(*p);
-                else builder.AppendNull();
-            }
-            std::shared_ptr<Array> out;
-            builder.Finish(&out);
-            return out;
+    // Insert into Last Value vector
+    lastValues[field_index] = value;
+
+    // Append appropriate type
+    if (std::holds_alternative<std::monostate>(value)) {
+        return builder->AppendNull();
+    }
+
+    switch (builder->type()->id()) {
+        case arrow::Type::DOUBLE:
+            return std::static_pointer_cast<arrow::DoubleBuilder>(builder)
+                ->Append(std::get<double>(value));
+
+        case arrow::Type::INT32:
+            return std::static_pointer_cast<arrow::Int32Builder>(builder)
+                ->Append(std::get<int32_t>(value));
+
+        case arrow::Type::INT64:
+            return std::static_pointer_cast<arrow::Int64Builder>(builder)
+                ->Append(std::get<int64_t>(value));
+
+        case arrow::Type::FLOAT:
+            return std::static_pointer_cast<arrow::FloatBuilder>(builder)
+                ->Append(std::get<float>(value));
+
+        case arrow::Type::BOOL:
+            return std::static_pointer_cast<arrow::BooleanBuilder>(builder)
+                ->Append(std::get<bool>(value));
+
+        case arrow::Type::DECIMAL128: {
+            __int128_t v = std::get<__int128_t>(value);
+            arrow::Decimal128 decimal((int64_t)(v >> 64), (uint64_t)v);
+            return std::static_pointer_cast<arrow::Decimal128Builder>(builder)
+                ->Append(decimal);
         }
 
         default:
-            throw std::runtime_error("Unsupported Arrow type in schema.");
+            return arrow::Status::Invalid("Unsupported type in SetValueAt()");
     }
 }
-
-// Convert your row-major vector-of-vectors into Arrow table
-std::shared_ptr<arrow::Table>
-BuildArrowTable(const TableData& data,
-                const std::shared_ptr<arrow::Schema>& schema)
+inline arrow::Result<std::shared_ptr<arrow::Table>>
+FinishTable(
+    const std::shared_ptr<arrow::Schema>& schema,
+    std::vector<std::shared_ptr<arrow::ArrayBuilder>>& builders)
 {
-    const size_t ncols = schema->num_fields();
-    const size_t nrows = data.size();
-
-    // Extract column-wise data
-    std::vector<std::vector<CellVariant>> cols(ncols);
-    for (const auto& row : data) {
-        if (row.size() != ncols)
-            throw std::runtime_error("Row width != schema column count");
-
-        for (size_t c = 0; c < ncols; ++c)
-            cols[c].push_back(row[c]);
+    if (schema->num_fields() != builders.size()) {
+        return arrow::Status::Invalid("Schema/builder count mismatch");
     }
 
-    // Build Arrow arrays for each column
-    std::vector<std::shared_ptr<arrow::Array>> arrays;
-    arrays.reserve(ncols);
+    // ------------------------------
+    // 1. Find the required final length
+    // ------------------------------
+    int64_t final_length = 0;
+    for (auto& b : builders) {
+        final_length = std::max(final_length, b->length());
+    }
 
-    for (size_t c = 0; c < ncols; ++c) {
-        auto arr = BuildColumnArray(cols[c], schema->field(c));
+    // ------------------------------
+    // 2. Pad each builder to final_length
+    // ------------------------------
+    for (auto& b : builders) {
+        int64_t curr = b->length();
+        if (curr < final_length) {
+            int64_t deficit = final_length - curr;
+            ARROW_RETURN_NOT_OK(b->AppendNulls(deficit));
+        }
+    }
+
+    // ------------------------------
+    // 3. Finish arrays
+    // ------------------------------
+    std::vector<std::shared_ptr<arrow::Array>> arrays;
+    arrays.reserve(builders.size());
+
+    for (auto& b : builders) {
+        std::shared_ptr<arrow::Array> arr;
+        ARROW_RETURN_NOT_OK(b->Finish(&arr));
+
+        if (arr->length() != final_length) {
+            return arrow::Status::Invalid("Array length mismatch after finishing");
+        }
+
         arrays.push_back(arr);
     }
 
-    return arrow::Table::Make(schema, arrays);
+    // ------------------------------
+    // 4. Build table
+    // ------------------------------
+    auto table = arrow::Table::Make(schema, arrays);
+    ARROW_RETURN_NOT_OK(table->Validate());
+
+    return table;
 }
 
-// Write Arrow table to Parquet
-void WriteParquet(const std::shared_ptr<arrow::Table>& table,
-                  const std::string& filename)
+
+
+
+
+inline arrow::Status AppendTableToParquet(
+    const std::shared_ptr<arrow::Table>& table,
+    const std::string& path,
+    std::unique_ptr<parquet::arrow::FileWriter>& writer,
+    std::shared_ptr<arrow::io::FileOutputStream>& outfile)  // keep stream alive
 {
-    auto outfile_result = arrow::io::FileOutputStream::Open(filename);
-    if (!outfile_result.ok()) throw std::runtime_error(outfile_result.status().ToString());
+    if (!writer) {
+        // First call: open file and create writer
+        ARROW_ASSIGN_OR_RAISE(outfile, arrow::io::FileOutputStream::Open(path));
 
-    std::shared_ptr<arrow::io::FileOutputStream> outfile = *outfile_result;
+        // Required writer properties
+        auto props = parquet::WriterProperties::Builder().build();
+        auto arrow_props = parquet::ArrowWriterProperties::Builder().build();
 
-    parquet::arrow::WriteTable(*table, arrow::default_memory_pool(),
-                               outfile, /*chunk_size=*/1024);
+        // Create the writer
+        ARROW_RETURN_NOT_OK(parquet::arrow::FileWriter::Open(
+            *table->schema(),                // const arrow::Schema&
+            arrow::default_memory_pool(),
+            outfile,                         // shared_ptr<OutputStream>
+            props,                           // WriterProperties
+            arrow_props,                     // ArrowWriterProperties
+            &writer                          // out: unique_ptr<FileWriter>
+        ));
+    }
+
+    // Write a row group containing all rows in this table
+    return writer->WriteTable(*table, table->num_rows()+1);
+}
+inline arrow::Status CloseParquetWriter(std::unique_ptr<parquet::arrow::FileWriter>& writer) {
+    if (writer) {
+        ARROW_RETURN_NOT_OK(writer->Close());
+        writer.reset();
+    }
+    return arrow::Status::OK();
 }

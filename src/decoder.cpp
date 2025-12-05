@@ -73,7 +73,7 @@ Decoder::Decoder(std::string dbc_filename){
     }
 }
 
-bool Decoder::decode(can_frame frame, std::vector<DataTypeOrVoid>* row_values){
+bool Decoder::decode(can_frame frame, std::vector<std::shared_ptr<arrow::ArrayBuilder>>& builders, int row, std::vector<DataTypeOrVoid>& lastValues){
     auto iter = messages.find(frame.can_id);
 
         if (iter != messages.end())
@@ -98,31 +98,22 @@ bool Decoder::decode(can_frame frame, std::vector<DataTypeOrVoid>* row_values){
                     if (it != schema_fields.end()){
                         //std::cout << "Found signal " << sig.Name() << " in schema at index " << std::distance(schema_fields.begin(), it) << " With type: " << it->parquet_type << "\n";
                         int index = std::distance(schema_fields.begin(), it);
+
                         // Set the value in the row_values based on the type
-                        
-                        if(sig.Name().substr(0, 6) == "flt32_"){
-                            std::array<unsigned char, 4> bytes = extract_32_bits(frame.data, sig.StartBit());
-                            uint32_t bits;
-                            
-                            std::memcpy(&bits, bytes.data(), sizeof(bits));
-                            row_values->at(index) = static_cast<float>(le_uint32_to_float(bits));
-                        }
-                        
-                        else if (it->parquet_type == parquet::Type::type::DOUBLE){
-                            row_values->at(index) = static_cast<double>(sig.RawToPhys(sig.Decode(frame.data)));
-                        } else if (it->parquet_type == parquet::Type::type::FLOAT){
-                            row_values->at(index) = static_cast<float>(sig.RawToPhys(sig.Decode(frame.data)));
-                        } else if (it->parquet_type == parquet::Type::type::INT32){
-                            row_values->at(index) = static_cast<int32_t>(sig.RawToPhys(sig.Decode(frame.data)));
-                        } else if (it->parquet_type == parquet::Type::type::INT64){
-                            row_values->at(index) = static_cast<int64_t>(sig.RawToPhys(sig.Decode(frame.data)));
-                        } else if (it->parquet_type == parquet::Type::type::INT96){
-                            row_values->at(index) = static_cast<__int128_t>(sig.RawToPhys(sig.Decode(frame.data)));
-                        } else if (it->parquet_type == parquet::Type::type::BOOLEAN){
-                            row_values->at(index) = static_cast<bool>(sig.RawToPhys(sig.Decode(frame.data)));
+                        if (schema_fields[index].arrow_datatype == arrow::boolean()){
+                            SetValueAt(builders, index, static_cast<bool>(sig.RawToPhys(sig.Decode(frame.data))), row, lastValues);
+                        } else if (schema_fields[index].arrow_datatype == arrow::int32()){
+                            SetValueAt(builders, index, static_cast<int32_t>(sig.RawToPhys(sig.Decode(frame.data))), row, lastValues);
+                        } else if (schema_fields[index].arrow_datatype == arrow::int64()){
+                            SetValueAt(builders, index, static_cast<int64_t>(sig.RawToPhys(sig.Decode(frame.data))), row, lastValues);
+                        } else if (schema_fields[index].arrow_datatype == arrow::float64()){
+                            SetValueAt(builders, index, static_cast<double>(sig.RawToPhys(sig.Decode(frame.data))), row, lastValues);
+                        } else if (schema_fields[index].arrow_datatype == arrow::float32()){
+                            SetValueAt(builders, index, static_cast<float>(sig.RawToPhys(sig.Decode(frame.data))), row, lastValues);
                         } else {
-                            std::cerr << "Unhandled parquet type for signal " << sig.Name() << "\n";
+                            std::cerr << "Smth borked\n";
                         }
+
                     } else {
                         std::cerr << "signal not found in schema_fields: " << CleanName << "\n";
                     }
