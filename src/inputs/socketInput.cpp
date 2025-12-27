@@ -36,8 +36,10 @@ SocketInput::SocketInput(const std::string socketName): socketName(socketName){
     }
 }
 
-void SocketInput::initialize(){
-    time_start_offset_chrono = std::chrono::high_resolution_clock::now();
+void SocketInput::initialize(bool adjust_timestamp){
+    if(adjust_timestamp){
+        time_start_offset_chrono = std::chrono::high_resolution_clock::now();
+    }
 }
 
 double SocketInput::getPacket(can_frame * const frame, std::atomic<bool>& EOI){

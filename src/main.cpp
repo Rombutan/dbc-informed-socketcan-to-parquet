@@ -40,7 +40,6 @@
 // In this project
 #include "custom_types.h"
 #include "arguments.h"
-#include "influxupload.h"
 #include "decoder.h"
 
 #include "inputs/genericInput.h"
@@ -50,6 +49,8 @@
 #include "inputs/stdinInput.h"
 
 #include "writeparquet.h"
+
+#include "websocketIPC.h"
 
 #define CACHE_ROWS 10000
 
@@ -98,6 +99,9 @@ int main(int argc, char* argv[])
     // Arrow schema for export
     auto schema = arrow::schema(fields);
     auto builders = CreateBuildersFromSchema(schema);
+
+    // Init input source
+    input->initialize(args.adjust_timestamp);
 
     // Most recent values (for live decode only)
     std::vector<ValueVariant> lastValues(decoder.schema_fields.size(), std::monostate{});
@@ -151,6 +155,25 @@ int main(int argc, char* argv[])
             auto st = AppendTableToParquet(table, args.parquet_filename, writer, outfile);
             std::cerr << st.ToString() << std::endl;
             builders = CreateBuildersFromSchema(schema);
+
+
+            // Websocket Write
+            if(args.host.size() > 2){
+                auto buffer_res = SerializeTableToIpcBuffer(table);
+                if (!buffer_res.ok()) {
+                    std::cerr << "Serialize failed: " << buffer_res.status().ToString() << "\n";
+                    return 1;
+                }
+                auto buffer = buffer_res.ValueOrDie();
+
+                auto ec = SendBufferOverWebSocket(args.host, "9000", "", buffer);
+                if (ec) {
+                    std::cerr << "WebSocket send failed: " << ec.message() << "\n";
+                    return 1;
+                }
+
+                std::cout << "Sent " << buffer->size() << " bytes over websocket\n";
+            }
         }
 
     }

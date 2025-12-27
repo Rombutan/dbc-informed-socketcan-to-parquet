@@ -12,7 +12,7 @@ public:
 
     // Reads first packet to set time, if necessary. Or anything else like that.
     // @param name interface/file/whatever name
-    virtual void initialize();
+    virtual void initialize(bool adjust_timestamp);
 
     // reads a single can frame, sets *frame to it's contents, and returns the time since instantiation in ms
     // @param frame output location for can bits

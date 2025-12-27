@@ -9,6 +9,8 @@
 #include <stdlib.h>
 #include <string.h>
 
+#define HELP_MESSAGE "Usage: \n ./decoder file.dbc [--of output.parquet] [--if vcan0] [--socket|--file|--stdin|--parquet] [--cache 10] [--no-adjust-timestamp] [--forward-fill] [--live-decode SIG_NAME] \n"
+
 
 enum source{
     SOCKETCAN,
@@ -27,16 +29,18 @@ struct CommandLineArugments {
     double cache_ms = 0.0;
     bool forward_fill = false;
     std::vector<std::string> live_decode_signals;
+    bool adjust_timestamp = true;
 
     // For upload
     std::string token;
     std::string host;
+    std::string port;
 };
 
 CommandLineArugments parse_cli_arguments(int argc, char* argv[]){
     CommandLineArugments args_out;
     if(argc < 1){
-        std::cout << "you must provide at least a dbc file name... \n Example: \n ./decoder file.dbc [--of output.parquet] [--if vcan0] [--socket|--file] [--cache 10] \n \"if\" is used for the interface name in socket mode and the file name in file mode \n";
+        std::cout << "you must provide at least a dbc file name... \n" << HELP_MESSAGE;
     }
 
     int arg = 2;
@@ -86,22 +90,17 @@ CommandLineArugments parse_cli_arguments(int argc, char* argv[]){
             std::cout << "Adding " << argv[arg+1] << " to live decode.\n";
             args_out.live_decode_signals.push_back(argv[arg+1]);
             arg++;
-        } else if(std::strcmp(argv[arg], "--upload-host") == 0)  {
-            if (arg + 1 >= argc) {
-                std::cerr << "Error: Missing host.\n";
-            }
-            std::cout << "Using " << argv[arg+1] << " as host.\n";
-            args_out.host = argv[arg+1];
+        } else if(std::strcmp(argv[arg], "--no-adjust-timestamp") == 0)  {
+            args_out.adjust_timestamp = false;
+            std::cout << "Using full epoch timestamp in milliseconds. \n";
             arg++;
-        }  else if(std::strcmp(argv[arg], "--upload-token") == 0)  {
-            if (arg + 1 >= argc) {
-                std::cerr << "Error: Missing token.\n";
-            }
-            std::cout << "Using " << argv[arg+1] << " as token.\n";
-            args_out.token = argv[arg+1];
-            arg++;
-        }  else {
-            std::cout << "Incorrect argument " << argv[argc] << ". Example: \n ./decoder file.dbc [--of output.parquet] [--if vcan0] [--socket|--file] [--cache 10] \n \"if\" is used for the interface name in socket mode and the file name in file mode \n";
+        } else if (std::strcmp(argv[arg], "-h") == 0){
+            std::cout << HELP_MESSAGE;
+            exit(0);
+        } else {
+            std::cout << "Incorrect argument " << argv[argc] << "\n" << HELP_MESSAGE << "\n";
+            std::cout << std::flush;
+            exit(2);
         }
 
         arg++;

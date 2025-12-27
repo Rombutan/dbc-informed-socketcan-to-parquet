@@ -13,7 +13,7 @@ FileInput::FileInput(const std::string fileName): fileName(fileName){
     infile = std::ifstream(fileName.c_str());
 }
 
-void FileInput::initialize(){
+void FileInput::initialize(bool adjust_timestamp){
     can_frame fframe= {};
     double timestamp;
     bool good = false;
@@ -22,7 +22,12 @@ void FileInput::initialize(){
         std::getline(infile, line);
         parse_can_line(line, timestamp, fframe, good);
     }
-    start_time_ms = timestamp*1000;
+    if(adjust_timestamp){
+        start_time_ms = timestamp*1000;
+    } else {
+        start_time_ms = 0;
+    }
+    
 }
 
 double FileInput::getPacket(can_frame * const frame, std::atomic<bool>& EOI){

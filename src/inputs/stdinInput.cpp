@@ -11,7 +11,7 @@
 
 StdinInput::StdinInput(const std::string fileName){}
 
-void StdinInput::initialize(){
+void StdinInput::initialize(bool adjust_timestamp){
     can_frame fframe= {};
     double timestamp;
     bool good = false;
@@ -20,7 +20,11 @@ void StdinInput::initialize(){
         std::getline(std::cin, line);
         parse_can_line(line, timestamp, fframe, good);
     }
-    start_time_ms = timestamp*1000;
+    if(adjust_timestamp) {
+        start_time_ms = timestamp*1000;
+    } else {
+        start_time_ms = 0;
+    }
 }
 
 double StdinInput::getPacket(can_frame * const frame, std::atomic<bool>& EOI){

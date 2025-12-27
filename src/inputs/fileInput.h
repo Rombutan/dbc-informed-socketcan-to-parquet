@@ -16,7 +16,7 @@ public:
 
     // Read first packet to set `time_start_offset_ms`
     // @param name interface/file/whatever name
-    void initialize() override;
+    void initialize(bool adjust_timestamp) override;
 
     // reads a single can frame, sets *frame to it's contents, and returns the difference between it's and the first timestamp in ms
     // @param frame output location for can bits
