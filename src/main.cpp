@@ -52,8 +52,6 @@
 
 #include "websocketIPC.h"
 
-#define CACHE_ROWS 10000
-
 // Should the program exit?
 std::atomic<bool> shouldExit;
 
@@ -149,7 +147,7 @@ int main(int argc, char* argv[])
         }
         messages++;
 
-        if((rows % CACHE_ROWS) == 0 && rows >= CACHE_ROWS){
+        if((rows % args.cache_rows) == 0 && rows >= args.cache_rows){
             auto table_res = FinishTable(schema, builders);
             auto table = table_res.ValueOrDie();
             auto st = AppendTableToParquet(table, args.parquet_filename, writer, outfile);

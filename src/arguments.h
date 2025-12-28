@@ -30,6 +30,7 @@ struct CommandLineArugments {
     bool forward_fill = false;
     std::vector<std::string> live_decode_signals;
     bool adjust_timestamp = true;
+    uint cache_rows = 1000;
 
     // For upload
     std::string token;
@@ -93,6 +94,12 @@ CommandLineArugments parse_cli_arguments(int argc, char* argv[]){
         } else if(std::strcmp(argv[arg], "--no-adjust-timestamp") == 0)  {
             args_out.adjust_timestamp = false;
             std::cout << "Using full epoch timestamp in milliseconds. \n";
+            arg++;
+        } else if (std::strcmp(argv[arg], "--cache-rows") == 0){
+            if (arg + 1 >= argc) {
+                std::cerr << "Error: Missing number of rows to cache.\n";
+            }
+            args_out.cache_rows = std::stoi(argv[arg+1]);
             arg++;
         } else if (std::strcmp(argv[arg], "-h") == 0){
             std::cout << HELP_MESSAGE;
