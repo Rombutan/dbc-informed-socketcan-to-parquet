@@ -9,7 +9,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-#define HELP_MESSAGE "Usage: \n ./decoder file.dbc [--of output.parquet] [--if vcan0] [--socket|--file|--stdin|--parquet] [--cache 10] [--no-adjust-timestamp] [--forward-fill] [--live-decode SIG_NAME] [--host https://dskjg.com --user default --pass password]\n"
+#define HELP_MESSAGE "Usage: \n ./decoder file.dbc --if vcan0 [--of output.parquet] [--socket|--file|--stdin|--parquet] [--cache 10] [--no-adjust-timestamp] [--forward-fill] [--live-decode SIG_NAME] [--host https://dskjg.com --user default --pass password]\n"
 
 
 enum source{
@@ -23,7 +23,7 @@ struct CommandLineArugments {
     source input = CANDUMP; 
     int num_packets_to_read = 100;
     std::string dbc_filename = "fs.dbc";
-    std::string parquet_filename = "test.parquet";
+    std::string parquet_filename = "";
     std::string table = "fs23migrated";
     std::string can_interface = "vcan0";
     double cache_ms = 0.0;

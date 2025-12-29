@@ -161,7 +161,9 @@ int main(int argc, char* argv[])
                 }
                 rows = 0;
 
-                auto st = AppendTableToParquet(table, args.parquet_filename, writer, outfile);
+                if(args.parquet_filename.length() > 2){
+                    auto st = AppendTableToParquet(table, args.parquet_filename, writer, outfile);
+                }
 
                 // Clickhouse Write
                 if(args.host.size() > 2){
