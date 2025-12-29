@@ -29,6 +29,12 @@
 #include "parquet/stream_writer.h"
 #include "arrow/io/file.h"
 
+#include <arrow/io/memory.h>
+#include <arrow/ipc/writer.h>
+#include <stdexcept>
+
+#include <httplib.h>
+
 #include <parquet/arrow/reader.h>
 #include <memory>
 
@@ -44,13 +50,11 @@
 
 #include "inputs/genericInput.h"
 #include "inputs/fileInput.h"
-#include "inputs/parquetInput.h"
+// #include "inputs/parquetInput.h"
 #include "inputs/socketInput.h"
 #include "inputs/stdinInput.h"
 
 #include "writeparquet.h"
-
-#include "websocketIPC.h"
 
 // Should the program exit?
 std::atomic<bool> shouldExit;
@@ -69,6 +73,7 @@ int main(int argc, char* argv[])
 
     // ----------------- Setup Input --------------------
     std::unique_ptr<GenericInput> input;
+//    ParquetInput pqInput;
 
     if(args.input == SOCKETCAN){
         input = std::make_unique<SocketInput>(args.can_interface);
@@ -88,7 +93,6 @@ int main(int argc, char* argv[])
 
     std::vector<std::shared_ptr<arrow::Field>> fields;
 
-    std::vector<arrow::Array> arrays;
     for (const auto& sig_ptr : decoder.schema_fields)
     {
         fields.push_back(arrow::field(sig_ptr.signal_name, sig_ptr.arrow_datatype));
@@ -113,8 +117,11 @@ int main(int argc, char* argv[])
     // Number of messages processed
     int messages = 0;
 
-    // Number of rows outputted
+    // Number of rows outputted (resets after each db write / output package)
     int rows = 0;
+
+    // Flag to add columns to the database (if enabled) only on the first write
+    bool need_to_add_columns = true;
 
     shouldExit.store(false);
     while(!shouldExit.load()){
@@ -144,36 +151,124 @@ int main(int argc, char* argv[])
             if(args.forward_fill){ // If forward fill is disabled, reset curRow to monostates/nulls
                 std::cout << "FORWARD FILL NOT WRITTEN\n";
             }
-        }
-        messages++;
 
-        if((rows % args.cache_rows) == 0 && rows >= args.cache_rows){
-            auto table_res = FinishTable(schema, builders);
-            auto table = table_res.ValueOrDie();
-            auto st = AppendTableToParquet(table, args.parquet_filename, writer, outfile);
-            std::cerr << st.ToString() << std::endl;
-            builders = CreateBuildersFromSchema(schema);
-
-
-            // Websocket Write
-            if(args.host.size() > 2){
-                auto buffer_res = SerializeTableToIpcBuffer(table);
-                if (!buffer_res.ok()) {
-                    std::cerr << "Serialize failed: " << buffer_res.status().ToString() << "\n";
-                    return 1;
+            if((rows % args.cache_rows) == 0 && rows >= args.cache_rows){            
+                auto table_res = FinishTable(schema, builders);
+                auto table = table_res.ValueOrDie();
+                
+                for (auto& builder : builders) {
+                    builder->Reset();
                 }
-                auto buffer = buffer_res.ValueOrDie();
+                rows = 0;
 
-                auto ec = SendBufferOverWebSocket(args.host, "9000", "", buffer);
-                if (ec) {
-                    std::cerr << "WebSocket send failed: " << ec.message() << "\n";
-                    return 1;
+                auto st = AppendTableToParquet(table, args.parquet_filename, writer, outfile);
+
+                // Clickhouse Write
+                if(args.host.size() > 2){
+                    auto output = arrow::io::BufferOutputStream::Create().ValueOrDie();
+
+                    auto writer =
+                        arrow::ipc::MakeStreamWriter(output, table->schema()).ValueOrDie();
+
+                    auto status = writer->WriteTable(*table);
+                    if (!status.ok()) {
+                        throw std::runtime_error(status.ToString());
+                    }
+
+                    status = writer->Close();
+                    if (!status.ok()) {
+                        throw std::runtime_error(status.ToString());
+                    }
+
+                    auto buffer = output->Finish().ValueOrDie();
+
+                    std::string arrow_payload(
+                        reinterpret_cast<const char*>(buffer->data()),
+                        buffer->size()
+                    );
+
+                    httplib::Client client(args.host);
+
+                    // Standard ClickHouse authentication
+                    client.set_default_headers({
+                        {"X-ClickHouse-User",     args.clickhouse_user},
+                        {"X-ClickHouse-Key",      args.clickhouse_password},
+                        {"Content-Type",          "application/octet-stream"}
+                    });
+
+                    if(need_to_add_columns){
+                        std::ostringstream query;
+
+                        query << "ALTER TABLE default.test_arrow ";
+
+                        bool first = true;
+
+                        for (const auto& field : decoder.schema_fields) {
+                            auto type_id = field.arrow_datatype->id();
+
+                            auto it = arrow_to_ch_type.find(type_id);
+                            if (it == arrow_to_ch_type.end()) {
+                                throw std::runtime_error(
+                                    "Unsupported Arrow type for column: " + field.signal_name
+                                );
+                            }
+
+                            std::string ch_type = it->second;
+
+                            if (!first) {
+                                query << ", ";
+                            }
+                            first = false;
+
+                            ch_type = "Nullable(" + ch_type + ")";
+
+                            query << "ADD COLUMN IF NOT EXISTS "
+                                << field.signal_name << " "
+                                << ch_type;
+
+                            need_to_add_columns = false;
+                        }
+
+                        auto res = client.Post(
+                            "/",
+                            query.str(),
+                            "application/octet-stream"
+                        );
+                        if (!res) {
+                            throw std::runtime_error("HTTP request failed");
+                        }
+
+                        if (res->status != 200) {
+                            std::cout << res->body << "\n";
+                            throw std::runtime_error(
+                                "ClickHouse error: HTTP " + std::to_string(res->status) +
+                                "\n" + res->body
+                            );
+                        }
+                    }
+
+                    auto res = client.Post(
+                        "/",
+                        "INSERT INTO default.test_arrow FORMAT ArrowStream\n" + arrow_payload,
+                        "application/octet-stream"
+                    );
+
+                    if (!res) {
+                        throw std::runtime_error("HTTP request failed");
+                    }
+
+                    if (res->status != 200) {
+                        std::cout << res->body << "\n";
+                        throw std::runtime_error(
+                            "ClickHouse error: HTTP " + std::to_string(res->status) +
+                            "\n" + res->body
+                        );
+                    }
                 }
-
-                std::cout << "Sent " << buffer->size() << " bytes over websocket\n";
+                std::cout << "Processed: " << messages << " messages.\n";
             }
         }
-
+        messages++;
     }
 
     auto table_res = FinishTable(schema, builders);

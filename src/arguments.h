@@ -9,7 +9,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-#define HELP_MESSAGE "Usage: \n ./decoder file.dbc [--of output.parquet] [--if vcan0] [--socket|--file|--stdin|--parquet] [--cache 10] [--no-adjust-timestamp] [--forward-fill] [--live-decode SIG_NAME] \n"
+#define HELP_MESSAGE "Usage: \n ./decoder file.dbc [--of output.parquet] [--if vcan0] [--socket|--file|--stdin|--parquet] [--cache 10] [--no-adjust-timestamp] [--forward-fill] [--live-decode SIG_NAME] [--host https://dskjg.com --user default --pass password]\n"
 
 
 enum source{
@@ -33,9 +33,9 @@ struct CommandLineArugments {
     uint cache_rows = 1000;
 
     // For upload
-    std::string token;
-    std::string host;
-    std::string port;
+    std::string clickhouse_user;
+    std::string clickhouse_password;
+    std::string host; // http://ip:port
 };
 
 CommandLineArugments parse_cli_arguments(int argc, char* argv[]){
@@ -100,6 +100,24 @@ CommandLineArugments parse_cli_arguments(int argc, char* argv[]){
                 std::cerr << "Error: Missing number of rows to cache.\n";
             }
             args_out.cache_rows = std::stoi(argv[arg+1]);
+            arg++;
+        } else if (std::strcmp(argv[arg], "--host") == 0){
+            if (arg + 1 >= argc) {
+                std::cerr << "Error: Missing host address.\n";
+            }
+            args_out.host = argv[arg+1];
+            arg++;
+        } else if (std::strcmp(argv[arg], "--user") == 0){
+            if (arg + 1 >= argc) {
+                std::cerr << "Error: Missing username.\n";
+            }
+            args_out.clickhouse_user = argv[arg+1];
+            arg++;
+        } else if (std::strcmp(argv[arg], "--pass") == 0){
+            if (arg + 1 >= argc) {
+                std::cerr << "Error: Missing password.\n";
+            }
+            args_out.clickhouse_password = argv[arg+1];
             arg++;
         } else if (std::strcmp(argv[arg], "-h") == 0){
             std::cout << HELP_MESSAGE;

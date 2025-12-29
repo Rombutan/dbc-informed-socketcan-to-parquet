@@ -39,7 +39,7 @@ add_executable(decoder
         src/custom_types.cpp 
         src/inputs/genericInput.cpp
         src/inputs/fileInput.cpp
-        src/inputs/parquetInput.cpp
+
         src/inputs/socketInput.cpp
         src/inputs/stdinInput.cpp)
 target_compile_options(decoder PUBLIC -g)

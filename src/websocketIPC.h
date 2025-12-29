@@ -90,7 +90,7 @@ SendBufferOverWebSocket(const std::string& host,
         ws.set_option(ws::stream_base::timeout::suggested(beast::role_type::client));
 
         // Perform the websocket handshake; host header should include port if it's nonstandard
-        std::string host_header = host + ":" + port;
+        std::string host_header = host;// + ":" + port;
         ws.handshake(host_header, target);
 
         // Send binary message with the whole buffer

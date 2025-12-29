@@ -40,4 +40,20 @@ DataTypeOrVoid scalar_to_variant(const std::shared_ptr<arrow::Scalar>& scalar);
 
 std::shared_ptr<arrow::DataType> map_parquet_to_arrow(parquet::Type::type t);
 
+static const std::unordered_map<arrow::Type::type, std::string> arrow_to_ch_type = {
+    {arrow::Type::INT8,    "Int8"},
+    {arrow::Type::INT16,   "Int16"},
+    {arrow::Type::INT32,   "Int32"},
+    {arrow::Type::INT64,   "Int64"},
+    {arrow::Type::UINT8,   "UInt8"},
+    {arrow::Type::UINT16,  "UInt16"},
+    {arrow::Type::UINT32,  "UInt32"},
+    {arrow::Type::UINT64,  "UInt64"},
+    {arrow::Type::FLOAT,   "Float32"},
+    {arrow::Type::DOUBLE,  "Float64"},
+    {arrow::Type::STRING,  "String"},
+    {arrow::Type::BINARY,  "String"},
+    {arrow::Type::BOOL,    "Bool"}
+};
+
 #endif

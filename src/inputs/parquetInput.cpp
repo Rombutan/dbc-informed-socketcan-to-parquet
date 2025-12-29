@@ -21,4 +21,13 @@ ParquetInput::ParquetInput(std::string fileName){
 
     std::cout << "Read table with " << table->num_rows()
             << " rows and " << table->num_columns() << " columns.\n";
+    
+    initialized = true;
 }
+
+ParquetInput::ParquetInput(){
+    initialized = false;
+    table.reset();
+}
+
+std::shared_ptr<arrow::Array> ParquetInput::emitRow()
