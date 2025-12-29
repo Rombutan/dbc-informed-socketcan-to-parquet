@@ -95,12 +95,33 @@ int main(int argc, char* argv[])
 
     for (const auto& sig_ptr : decoder.schema_fields)
     {
-        fields.push_back(arrow::field(sig_ptr.signal_name, sig_ptr.arrow_datatype));
+        fields.push_back(arrow::field(sig_ptr.signal_name, sig_ptr.arrow_datatype, true));
     }
 
     // Arrow schema for export
     auto schema = arrow::schema(fields);
     auto builders = CreateBuildersFromSchema(schema);
+
+    httplib::Client client("http://localhost:8123");
+
+    // Database initial setup stuff
+    if (args.host.length() > 2){
+        client = httplib::Client(args.host);
+
+        client.set_keep_alive(true);
+
+        // Standard ClickHouse authentication
+        client.set_default_headers({
+            {"Connection", "keep-alive"},
+            {"X-ClickHouse-User",     args.clickhouse_user},
+            {"X-ClickHouse-Key",      args.clickhouse_password},
+            {"Content-Type",          "application/octet-stream"},
+            {"Expect", ""}
+        });
+
+        // This tries to disable system TCP caching...
+        client.set_tcp_nodelay(true);
+    }
 
     // Init input source
     input->initialize(args.adjust_timestamp);
@@ -170,7 +191,7 @@ int main(int argc, char* argv[])
                     auto output = arrow::io::BufferOutputStream::Create().ValueOrDie();
 
                     auto writer =
-                        arrow::ipc::MakeStreamWriter(output, table->schema()).ValueOrDie();
+                        arrow::ipc::MakeStreamWriter(output, schema).ValueOrDie();
 
                     auto status = writer->WriteTable(*table);
                     if (!status.ok()) {
@@ -188,15 +209,6 @@ int main(int argc, char* argv[])
                         reinterpret_cast<const char*>(buffer->data()),
                         buffer->size()
                     );
-
-                    httplib::Client client(args.host);
-
-                    // Standard ClickHouse authentication
-                    client.set_default_headers({
-                        {"X-ClickHouse-User",     args.clickhouse_user},
-                        {"X-ClickHouse-Key",      args.clickhouse_password},
-                        {"Content-Type",          "application/octet-stream"}
-                    });
 
                     if(need_to_add_columns){
                         std::ostringstream query;
@@ -231,6 +243,8 @@ int main(int argc, char* argv[])
                             need_to_add_columns = false;
                         }
 
+                        std::cout << query.str() << "\n";
+
                         auto res = client.Post(
                             "/",
                             query.str(),
@@ -248,12 +262,14 @@ int main(int argc, char* argv[])
                             );
                         }
                     }
-
+                    auto start = std::chrono::high_resolution_clock::now();
                     auto res = client.Post(
-                        "/",
-                        "INSERT INTO default.test_arrow FORMAT ArrowStream\n" + arrow_payload,
+                        "/?query=INSERT INTO default.test_arrow FORMAT ArrowStream&async_insert=1&wait_for_async_insert=0&insert_null_as_default=0&input_format_arrow_import_nested=1",
+                        arrow_payload,
                         "application/octet-stream"
                     );
+                    auto end = std::chrono::high_resolution_clock::now();
+                    std::cout << "Transmission time: " << std::chrono::duration_cast<std::chrono::milliseconds>(end - start).count() << "ms\n";
 
                     if (!res) {
                         throw std::runtime_error("HTTP request failed");
